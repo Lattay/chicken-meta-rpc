@@ -1,0 +1,11 @@
+((license "MIT")
+ (category network)
+ (dependencies matchable)
+ (test-dependencies matchable test)
+ (author "Théo Cavignac")
+ (version "0.1.0")
+ (synopsis "Multiple encoding rpc client and server implementation for CHICKEN")
+ (components 
+    (extension meta-rpc
+      (source "src/meta-rpc.scm")
+      (modules meta-rpc))))

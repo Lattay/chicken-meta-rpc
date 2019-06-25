@@ -5,17 +5,13 @@ PREFIX=/usr/local
 all: meta-rpc.so
 
 # Development tests
-test: meta-rpc-imple.so
+test:
 	$(PREFIX)/bin/csc -I tests/ tests/tests.scm -o run
 	./run
 
-# Development interface
-meta-rpc-imple.so:
-	$(PREFIX)/bin/csc -s src/meta-rpc-imple.scm
-
 # Module interface
-meta-rpc.so:
-	$(PREFIX)/bin/csc -s -j meta-rpc -o meta-rpc.so src/meta-rpc.scm
+meta-rpc.so: src/meta-rpc.scm src/client.scm src/server.scm src/common.scm
+	$(PREFIX)/bin/csc -s -j meta-rpc -o $@ $<
 	$(PREFIX)/bin/csc meta-rpc.import.scm -dynamic
 
 clean:
