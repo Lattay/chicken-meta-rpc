@@ -11,7 +11,7 @@
  (import scheme
          chicken.base)
  
- (include "src/common.scm")
- (include "src/server.scm")
- (include "src/client.scm")
+ (include "src/main/common.scm")
+ (include "src/main/server.scm")
+ (include "src/main/client.scm")
 )

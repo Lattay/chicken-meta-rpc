@@ -8,4 +8,10 @@
  (components 
     (extension meta-rpc
       (source "src/meta-rpc.scm")
-      (modules meta-rpc))))
+      (modules meta-rpc))
+    (extension meta-rpc.interface
+      (source "src/interface.scm")
+      (module meta-rpc.interface))
+    (extension meta-rpc.transport
+      (source "src/transport/transport.scm")
+      (module meta-rpc.transport))))

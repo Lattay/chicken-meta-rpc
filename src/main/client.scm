@@ -1,8 +1,8 @@
 (import scheme
-        chicken.base
-        chicken.io)
+        chicken.base)
 (import matchable
         srfi-18
+        srfi-69
         mailbox)
 
 (define client-wait-sleep-time (make-parameter 0.05)) ; 50 ms
@@ -16,10 +16,10 @@
           (lambda (port)
             (case type
               ((request)
-               (msg-format 'rpc-write-request port
+               (rpc-write-request msg-format port
                            (list call-id method-name args)))
               ((notify)
-               (msg-format 'rpc-write-notification port
+               (rpc-write-notification msg-format port
                            (list method-name args))))))))
 
 (define (client-wait responses call-id)
@@ -48,7 +48,7 @@
 (define (send-requests-one-co transport requests responses connection)
   (unless (mailbox-empty? requests)
     (if (or (not (connection)) (port-closed? (cdr (connection))))
-        (let-values (((in out) (transport 'connect)))
+        (let-values (((in out) (connect transport)))
           (connection (cons in out))))
     (let* ((req (mailbox-receive! requests))
            (id (car req))
@@ -59,7 +59,7 @@
 
 (define (receive-responses-one-co responses events connection msg-format)
   (when (char-ready? (car (connection)))
-    (let ((msg (msg-format 'rpc-read (car (connection)))))
+    (let ((msg (rpc-read msg-format (car (connection)))))
       (case (car msg)
         ((response)
          (hash-table-set! responses (cadr msg) (cons 'response msg)))
@@ -72,7 +72,7 @@
 (define (send-requests-multi-co transport requests responses connections)
   (unless (or (mailbox-empty? requests)
               (> (client-max-connections) (hash-table-size connections)))
-    (let-values (((in out) (transport 'connect)))
+    (let-values (((in out) (connect transport)))
       (let* ((req (mailbox-receive! requests))
              (id (car req))
              (send-to (cdr req)))
@@ -88,13 +88,13 @@
     (lambda (id co)
       (if (char-ready? (car co))
           (begin
-            (hash-table-set! responses id (cons 'response (msg-format 'rpc-read (car co))))
+            (hash-table-set! responses id (cons 'response (rpc-read msg-format (car co))))
             (close-input-port (car co))
             #t)
           #f))))
 
 (define (client-worker transport msg-format requests responses events)
-  (let* ((one-co (not (transport 'one-shot?))) ; one-shot connectionS or multi-shot connection_
+  (let* ((one-co (not (one-shot? transport))) ; one-shot connectionS or multi-shot connection_
          (connection (if one-co (make-parameter #f) #f))
          (connections (if one-co #f (make-hash-table))))
     (let loop ((t-prev (time)))

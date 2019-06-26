@@ -1,9 +1,7 @@
 (import scheme
         chicken.base
-        chicken.io
         chicken.condition)
-(import srfi-18
-        srfi-69)
+(import srfi-18)
 
 (define-syntax decr!
   (syntax-rules ()

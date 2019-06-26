@@ -1,7 +1,8 @@
 (import scheme
-        chicken.base
-        chicken.io)
+        chicken.base)
 (import matchable
+        coops
+        meta-rpc.interface
         srfi-18
         srfi-69
         mailbox)
@@ -48,7 +49,7 @@
 
 (define (server-worker close-co msg-format input output responses)
   ; thread handling an incoming message
-  (let ((response (call-method (log-errors "reading" (msg-format 'rpc-read input)))))
+  (let ((response (call-method (log-errors "reading" (rpc-read msg-format input)))))
     (if (not (eq? response 'no-response))
         (mailbox-send! responses (cons output response))))
   (if close-co
@@ -89,7 +90,7 @@
                (output (car mail))
                (msg (cdr mail)))
           (log-errors "writing/response"
-                      (msg-format 'rpc-write-response output msg))
+                      (rpc-write-response msg-format output msg))
           (if close-co
               (close-output-port output))
           (loop (add1 sent))))))
@@ -105,13 +106,13 @@
                  (method-name (car event))
                  (args (cdr event)))
             (log-errors "writing/notification"
-                        (msg-format 'rpc-write-notification output
+                        (rpc-write-notification msg-format output
                                     (list method-name args)))
             (loop (cdr rest)))))))
 
 (define (make-server transport msg-format)
   (let* ((responses (make-mailbox))
-         (close-co (transport 'one-shot?))
+         (close-co (one-shot? transport))
          (events (and (not close-co) (make-mailbox))))
     (values
       ; return 2 values: the server main thread ready to be launched and the event mailbox
@@ -129,9 +130,9 @@
               ; open new threads for incoming messages
               (set! n-th (handle-incoming-msg connections responses close-co n-th msg-format))
               ; handle one of the incoming new connection
-              (if (and (transport 'ready) (< n-co (server-max-connections)))
+              (if (and (ready? transport) (< n-co (server-max-connections)))
                   (log-errors "new conn"
-                              (let-values (((new-in new-out) (transport 'accept)))
+                              (let-values (((new-in new-out) (accept transport)))
                                 (loop t-now (cons (cons new-in new-out) connections) (add1 n-co) n-th)))
                   (loop t-now connections n-co n-th))))))
       events)))
