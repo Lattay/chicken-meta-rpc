@@ -1,13 +1,23 @@
 (import scheme
-        chicken.base)
-(import matchable
-        srfi-18
+        chicken.base
+        chicken.format
+        chicken.condition)
+(import srfi-18
         srfi-69
         mailbox)
 
 (define client-wait-sleep-time (make-parameter 0.05)) ; 50 ms
 (define client-min-loop-time (make-parameter 0.05)) ; 50 ms
 (define client-max-connections (make-parameter 5))
+(define client-wait-timeout (make-parameter 600))
+
+(define (make-timeout-error id t)
+  (let ((message (format "timeout error waiting for ~A for ~A s" id t)))
+    (condition
+      `(exn location rpc-client message ,message)
+      '(rpc)
+      '(client)
+      `(timeout id ,id))))
 
 (define (client-request requests type call-id msg-format method-name args)
   (mailbox-send!
@@ -20,18 +30,23 @@
                            (list call-id method-name args)))
               ((notify)
                (rpc-write-notification msg-format port
-                           (list method-name args))))))))
+                           (list method-name args)))
+              (else #f))))))
 
 (define (client-wait responses call-id)
   ; loop until responses is set in table
-  (let ((tmp (hash-table-ref/default responses call-id #f)))
-    (if tmp
+  (let loop ((start-waiting (time)))
+    (let ((tmp (hash-table-ref/default responses call-id #f)))
+      (if tmp
         (begin
           (hash-table-delete! responses call-id)
           tmp)
         (begin
           (thread-sleep! (client-wait-sleep-time))
-          (client-wait responses call-id)))))
+          (let ((waited  (- (time) start-waiting)))
+            (if (> waited (client-wait-timeout))
+              (signal (make-timeout-error call-id waited))
+              (loop start-waiting))))))))
 
 (define gen-id
   ; thread safe counter
@@ -47,14 +62,14 @@
 
 (define (send-requests-one-co transport requests responses connection)
   (unless (mailbox-empty? requests)
-    (if (or (not (connection)) (port-closed? (cdr (connection))))
+    (when (or (not (connection)) (port-closed? (cdr (connection))))
         (let-values (((in out) (connect transport)))
           (connection (cons in out))))
     (let* ((req (mailbox-receive! requests))
            (id (car req))
            (send-to (cdr req)))
-      (error-as-msg ((err res) (send-to (cdr (connection))))
-                    (if err (hash-table-set! responses id (cons 'error err))))
+      (error-as-msg ((err _) (send-to (cdr (connection))))
+                    (when err (hash-table-set! responses id (cons 'error err))))
       (send-requests-one-co transport requests responses connection))))
 
 (define (receive-responses-one-co responses events connection msg-format)
@@ -77,8 +92,8 @@
              (id (car req))
              (send-to (cdr req)))
         (hash-table-set! connections id (cons in out))
-        (error-as-msg ((err res) (send-to out))
-                      (if err (hash-table-set! responses id (cons 'error err))))
+        (error-as-msg ((err _) (send-to out))
+                      (when err (hash-table-set! responses id (cons 'error err))))
         (close-output-port out))
       (send-requests-multi-co transport requests responses connections))))
 

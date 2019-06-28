@@ -2,9 +2,11 @@
                   server-min-loop-time
                   server-max-threads
                   server-max-connections
+                  *rpc-methods*
 
                   make-client
                   client-wait-sleep-time
+                  client-wait-timeout
                   client-min-loop-time
                   client-max-connections)
 

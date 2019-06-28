@@ -1,8 +1,3 @@
-(import scheme
-        chicken.base)
-(import coops)
-(import (only meta-rpc.interface <transport-server> <transport-client>))
-
 ; server side
 (define-class <transport-server-file> (<transport-server>)
   ((ready #f)))
@@ -12,7 +7,7 @@
 (define-method (one-shot? (serv <transport-server-file>))
   #f)
 
-(define-method (ready? (serv <transport-server-file))
+(define-method (ready? (serv <transport-server-file>))
   (slot-value serv 'ready))
 
 ; fifo specific
@@ -23,7 +18,7 @@
   (make <transport-server-fifo> 'infile infile 'outfile 'outfile))
 
 (define-method (accept (serv <transport-server-fifo>))
-  (set! (slot-value serv ready) #f)
+  (set! (slot-value serv 'ready) #f)
   (values
     (open-input-file (slot-value serv 'infile))
     (open-output-file (slot-value serv 'outfile))))
@@ -34,8 +29,8 @@
 (define (make-transport-server-stdio)
   (make <transport-server-fifo>))
 
-(define-method (accept (serv <transport-server-stdio))
-  (set! (slot-value serv ready) #f)
+(define-method (accept (serv <transport-server-stdio>))
+  (set! (slot-value serv 'ready) #f)
   (values
     (current-input-port)
     (current-output-port)))
@@ -43,7 +38,7 @@
 ; client side
 (define-class <transport-client-file> (<transport-client>))
 
-(define-method (one-shot? (client <transport-client-file>)) #f)
+(define-method (one-shot? (cli <transport-client-file>)) #f)
 
 (define-class <transport-client-fifo> (<transport-client-file>)
   (infile outfile))
@@ -53,8 +48,8 @@
 
 (define-method (connect (cli <transport-client-stdio>))
   (values
-    (open-input-file (slot-value serv 'infile))
-    (open-output-file (slot-value serv 'outfile))))
+    (open-input-file (slot-value cli 'infile))
+    (open-output-file (slot-value cli 'outfile))))
 
 ; stdio specific
 (define-class <transport-client-stdio> (<transport-client-file>))
