@@ -19,8 +19,8 @@ test-test: test/test-test-tools.scm test/tunnel.scm test/test-pseudo-format.scm 
 test: meta-rpc.so meta-rpc.transport.so meta-rpc.interface.so test/test.scm test/test-pseudo-format.scm test/test-pseudo-transport.scm
 	$(CSC) test/test.scm -o run && ./run
 
-unit: test/test-server-unit.scm src/main/server.scm test/test-pseudo-format.scm test/test-pseudo-transport.scm test/tunnel.scm meta-rpc.interface.so
-	$(CSC) test/test-server-unit.scm -o unit && ./unit
+unit: test/test-unit.scm test/test-server-unit.scm src/main/server.scm test/test-pseudo-format.scm test/test-pseudo-transport.scm test/tunnel.scm meta-rpc.interface.so
+	$(CSC) test/test-unit.scm -o unit && ./unit
 
 # main module
 meta-rpc.so: src/meta-rpc.scm src/main/client.scm src/main/server.scm src/main/common.scm meta-rpc.interface.so

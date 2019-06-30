@@ -66,10 +66,10 @@
 
 (define (call-method name params)
   ; call method and handle errors
-  (if (not (hash-table-exists? (*rpc-methods*) name))
+  (if (not (hash-table-exists? *rpc-methods* name))
       (list (make-rpc-error 'method-not-found) '())
       (condition-case
-        (list '() (apply (hash-table-ref (*rpc-methods*) name) params))
+        (list '() (apply (hash-table-ref *rpc-methods* name) params))
 
         (e (exn rpc app)
            (list (make-app-error e) '()))
