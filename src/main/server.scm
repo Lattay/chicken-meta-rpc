@@ -102,15 +102,15 @@
 
 (define (server-worker close-co msg-format input output responses)
   ; thread handling an incoming message
-  (mailbox-send!
-    responses
-    (cons output
+  (let ((result
           (let-values (((err message) (read-message msg-format input)))
-            (if err
-                (list -1 "invalid" err '())
-                (handle-request message)))))
+                      (if err
+                        (list -1 "invalid" err '())
+                        (handle-request message)))))
+    (unless (null? result)
+      (mailbox-send!  responses (cons output result))))
   (when close-co
-      (close-input-port input)))
+    (close-input-port input)))
 
 (define (handle-incoming-msg connections responses close-co n-th msg-format)
   ; recursively find the first connection ready to deliver a message
@@ -154,8 +154,7 @@
 
 (define (send-events events connections msg-format)
   ; broadcast all pending events to all connected clients
-  (unless (or (mailbox-empty? events)
-              (null? connections))
+  (unless (mailbox-empty? events)
     (let loop ((rest connections))
       (unless (null? rest)
           (let* ((output (cdar rest))
@@ -175,10 +174,10 @@
     (values
       ; return 2 values: the server main thread ready to be launched and the event mailbox
       (lambda ()
-        (let loop ((t-prev (time)) (connections '()) (n-co 0) (n-th 0))
+        (let loop ((t-prev (time-stamp)) (connections '()) (n-co 0) (n-th 0))
           ; prevent the loop from using 100% CPU for nothing
-          (thread-sleep! (+ (server-min-loop-time) t-prev (- (time))))
-          (let ((t-now (time)))
+          (thread-sleep! (+ (server-min-loop-time) t-prev (- (time-stamp))))
+        (let ((t-now (time-stamp)))
             (when events
                 ; broadcast event to all connected clients
                 (send-events events connections msg-format))

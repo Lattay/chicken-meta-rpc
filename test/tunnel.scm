@@ -4,8 +4,15 @@
   (let ((buffer '())
         (rev-buff '())
         (closed #f))
-    (let ((this-write (lambda (char)
-                        (set! buffer (cons char buffer))))
+    (let ((this-write (lambda (str)
+                        (unless closed
+                          (assert (and 'write-char (string? str)))
+                          (let loop ((rest (string->list str)))
+                            (if (null? rest)
+                              '()
+                              (begin 
+                                (set! buffer (cons (car rest) buffer))
+                                (loop (cdr rest))))))))
           (this-read (lambda ()
                        (if closed
                            #!eof
@@ -20,9 +27,9 @@
                                  (set! rev-buff (cdr rev-buff))
                                  tmp)))))
           (this-ready? (lambda ()
-                         (not (and closed (null? rev-buff) (null? buffer)))))
+                         (and (not closed) (not (and (null? rev-buff) (null? buffer))))))
           (this-close (lambda ()
-                        (set! closed #f))))
+                        (set! closed #t))))
       (values
         (make-input-port this-read this-ready? this-close)
         (make-output-port this-write this-close)))))

@@ -59,5 +59,5 @@
                                     (get-exn-msg e)))))
        body ...))))
 
-(define (time)
+(define (time-stamp)
   (time->seconds (current-time)))

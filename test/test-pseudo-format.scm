@@ -9,19 +9,14 @@
 
 ; write the given message to the port
 (define-method (rpc-write-request (fmt <pseudo-format>) port msg)
-  (with-current-output-port port
-                            (lambda ()
-                              (print (cons 'request msg)))))
+  (write (cons 'request msg) port))
+
 (define-method (rpc-write-notification (fmt <pseudo-format>) port msg)
-  (with-current-output-port port 
-                            (lambda ()
-                              (print (cons 'notification msg)))))
+  (write (cons 'notification msg) port))
 
 (define-method (rpc-write-response (fmt <pseudo-format>) port msg)
-  (with-current-output-port port
-                            (lambda ()
-                              (print (cons 'response msg)))))
+  (write (cons 'response msg) port))
 
 ; read from port a rpc message and return a list
 (define-method (rpc-read (fmt <pseudo-format>) port)
-  (with-current-input-port port read))
+  (read port))

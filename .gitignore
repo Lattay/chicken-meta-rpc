@@ -1,4 +1,6 @@
 *.so
 *.c
 *.import.scm
-
+run
+unit
+test

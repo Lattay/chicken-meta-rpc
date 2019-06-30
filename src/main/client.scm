@@ -35,7 +35,7 @@
 
 (define (client-wait responses call-id)
   ; loop until responses is set in table
-  (let loop ((start-waiting (time)))
+  (let loop ((start-waiting (time-stamp)))
     (let ((tmp (hash-table-ref/default responses call-id #f)))
       (if tmp
         (begin
@@ -43,7 +43,7 @@
           tmp)
         (begin
           (thread-sleep! (client-wait-sleep-time))
-          (let ((waited  (- (time) start-waiting)))
+          (let ((waited  (- (time-stamp) start-waiting)))
             (if (> waited (client-wait-timeout))
               (signal (make-timeout-error call-id waited))
               (loop start-waiting))))))))
@@ -112,14 +112,14 @@
   (let* ((one-co (not (one-shot? transport))) ; one-shot connectionS or multi-shot connection_
          (connection (if one-co (make-parameter #f) #f))
          (connections (if one-co #f (make-hash-table))))
-    (let loop ((t-prev (time)))
-      (thread-sleep! (+ (client-min-loop-time) (time)))
+    (let loop ((t-prev (time-stamp)))
+      (thread-sleep! (+ (client-min-loop-time) (time-stamp)))
       (if one-co
-          (let ((t-now (time)))
+          (let ((t-now (time-stamp)))
             (send-requests-one-co transport requests responses connection)
             (receive-responses-one-co responses events connection msg-format)
             (loop t-now))
-          (let ((t-now (time)))
+          (let ((t-now (time-stamp)))
             (send-requests-multi-co transport requests responses connections)
             (receive-responses-multi-co responses connections msg-format)
             (loop t-now))))))
