@@ -11,6 +11,13 @@
 (define client-max-connections (make-parameter 5))
 (define client-wait-timeout (make-parameter 600))
 
+(define (make-multi-thread-parameter value)
+  (let ((val value))
+        (lambda arg
+          (when (not (null? arg))
+              (set! val (car arg)))
+          val)))
+
 (define (make-timeout-error id t)
   (let ((message (format "timeout error waiting for ~A for ~A s" id t)))
     (condition
@@ -93,7 +100,7 @@
     ((exn i/o)
      '(error "i/o failure"))
     (e (exn)
-       `(error ,e))))
+       (signal e))))
 
 (define (receive-responses-one-co responses events connection msg-format)
   (when (char-ready? (car (connection)))
@@ -104,7 +111,8 @@
         ((notify)
          (mailbox-send! events msg))
         ((error)
-         (mailbox-send! events msg))
+         ; (mailbox-send! events msg))
+         (error msg))
         (else ; should not happend
           (let ((m (format "fuck this ~A!" msg)))
             (signal
@@ -122,7 +130,8 @@
               ((response id method err result)
                (hash-table-set! responses id (list err result)))
               ((error err)
-               (hash-table-set! responses id (list err '())))
+               (hash-table-set! responses id (list err '()))
+               (error err))
               (any
                 (signal
                   (condition
@@ -133,7 +142,7 @@
 
 (define (client-worker transport msg-format requests responses events stop)
   (let* ((one-co (not (one-shot? transport))) ; one-shot connectionS or multi-shot connection_
-         (connection (if one-co (make-parameter #f) #f))
+         (connection (if one-co (make-multi-thread-parameter #f) #f))
          (connections (if one-co #f (make-hash-table))))
     (let loop ((t-prev (time-stamp)))
       (if (stop)
@@ -160,7 +169,7 @@
   (let* ((requests (make-mailbox))
          (responses (make-hash-table))
          (events (make-mailbox))
-         (stop-client (make-parameter #f))
+         (stop-client (make-multi-thread-parameter #f))
          (start-client (make-thread
                          (lambda ()
                            (client-worker transport msg-format requests

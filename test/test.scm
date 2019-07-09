@@ -6,11 +6,13 @@
 
 (load "test/pseudo-transport.scm")
 (load "test/pseudo-format.scm")
+
 (load "meta-rpc.so")
 (import meta-rpc)
 
 (load "test/tunnel.scm")
 
+(log-port (open-output-file "rpc-test.log"))
 
 (define transport (make-pseudo-transport #f))
 (define msg-format (make-pseudo-format))
@@ -86,8 +88,10 @@
     )
   (test-group "server")
   (test-group "integrated"
+    (define (debug co n-co n-th)
+      (display (format "~A ~A\n" co n-th) (log-port)))
     (define client (make-client transport msg-format))
-    (define-values (server events) (make-server transport msg-format))
+    (define-values (server events) (make-server transport msg-format debug))
     (thread-start! server)
     (define-syntax test-sync-call-foo
       (syntax-rules ()
@@ -114,3 +118,5 @@
       (test-sync-call-bar client 4))
     )
   )
+
+(close-output-port (log-port))

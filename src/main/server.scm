@@ -13,6 +13,15 @@
 (define server-max-threads (make-parameter 5))
 (define server-max-connections (make-parameter 10))
 
+(define-record conn lock in out)
+
+(define (locked? lock)
+  (case (mutex-state lock)
+    ((not-owned) #f)
+    ((abandoned) #f)
+    ((not-abandoned) #f)
+    (else #t)))
+
 (define (make-rpc-error type #!key (message "") (data '()) (code #f))
   (let ((err (make-hash-table)))
     (hash-table-set! err "data" '())
@@ -60,7 +69,7 @@
   (if (null? connections)
       (values #f '())
       (let ((co (car connections)) (rest (cdr connections)))
-        (if (char-ready? (car co))
+        (if (and (not (locked? (conn-lock co))) (char-ready? (conn-in co)))
             (values co rest)
             (first-ready rest)))))
 
@@ -82,7 +91,7 @@
   ; should not happen
   (match-lambda*
     ((('request id method-name params))
-     (cons id (cons method-name (call-method method-name params))))
+     (triplet id method-name (call-method method-name params)))
     ((('notification method-name params))
      (call-method method-name params)
      '())
@@ -100,15 +109,18 @@
     (e (exn)
        (values (make-rpc-error 'server-error data: e) #f))))
 
-(define (server-worker close-co msg-format input output responses)
+(define (server-worker close-co msg-format lock input output responses)
   ; thread handling an incoming message
   (let ((result
-          (let-values (((err message) (read-message msg-format input)))
-                      (if err
-                        (list -1 "invalid" err '())
-                        (handle-request message)))))
+          (begin
+            (mutex-lock! lock)
+            (let-values (((err message) (read-message msg-format input)))
+              (mutex-unlock! lock)
+              (if err
+                  (list -1 "invalid" err '())
+                  (handle-request message))))))
     (unless (null? result)
-      (mailbox-send!  responses (cons output result))))
+      (mailbox-send! responses (triplet lock output result))))
   (when close-co
     (close-input-port input)))
 
@@ -117,10 +129,10 @@
   ; and start a thread to handle it
   (let-values (((co rest) (first-ready connections)))
     (if (and co (< n-th (server-max-threads)))
-        (let ((input (car co)) (output (cdr co)))
+        (let ((lock (conn-lock co)) (input (conn-in co)) (output (conn-out co)))
           (thread-start!
             (lambda ()
-              (server-worker close-co msg-format input output responses)))
+              (server-worker close-co msg-format lock input output responses)))
           (handle-incoming-msg rest responses (add1 n-th) (server-max-threads) msg-format))
         n-th)))
 
@@ -129,8 +141,10 @@
   (let loop ((rest connections) (kept '()) (n-kept 0))
     (if (null? rest)
         (values kept n-kept)
-        (let ((in (caar rest)) (out (cdar rest)))
-          (if (and (port-closed? in) (port-closed? out))
+        (let ((lock (conn-lock (car rest)))
+              (in (conn-in (car rest)))
+              (out (conn-out (car rest))))
+          (if (and (port-closed? in) (port-closed? out) (not (locked? lock)))
               (loop (cdr rest)
                     kept
                     n-kept)
@@ -144,10 +158,13 @@
     (if (mailbox-empty? responses)
         sent
         (let* ((mail (mailbox-receive! responses))
-               (output (car mail))
-               (message (cdr mail)))
+               (lock (car mail))
+               (output (cadr mail))
+               (message (cddr mail)))
+          (mutex-lock! lock)
           (log-errors "writing/response"
                       (rpc-write-response msg-format output message))
+          (mutex-unlock! lock)
           (when close-co
               (close-output-port output))
           (loop (add1 sent))))))
@@ -157,7 +174,7 @@
   (unless (mailbox-empty? events)
     (let loop ((rest connections))
       (unless (null? rest)
-          (let* ((output (cdar rest))
+          (let* ((output (conn-out (car rest)))
                  (event (mailbox-receive! events))
                  (method-name (car event))
                  (args (cdr event)))
@@ -166,7 +183,8 @@
                                     (list method-name args)))
             (loop (cdr rest)))))))
 
-(define (make-server transport msg-format)
+(define (nop . args) '())
+(define (make-server transport msg-format #!optional (debug nop))
   (assert (and 'is-a-msg-format (message-format? msg-format)))
   (let* ((responses (make-mailbox))
          (close-co (one-shot? transport))
@@ -175,6 +193,7 @@
       ; return 2 values: the server main thread ready to be launched and the event mailbox
       (lambda ()
         (let loop ((t-prev (time-stamp)) (connections '()) (n-co 0) (n-th 0))
+          (debug connections n-co n-th)
           ; prevent the loop from using 100% CPU for nothing
           (let ((t-now (time-stamp)))
             (thread-sleep! (+ (server-min-loop-time) t-prev (- t-now)))
@@ -190,6 +209,9 @@
               (if (and (ready? transport) (< n-co (server-max-connections)))
                   (log-errors "new conn"
                               (let-values (((new-in new-out) (accept transport)))
-                                (loop t-now (cons (cons new-in new-out) connections) (add1 n-co) n-th)))
+                                (loop t-now (cons
+                                              (make-conn (make-mutex) new-in new-out)
+                                              connections)
+                                      (add1 n-co) n-th)))
                   (loop t-now connections n-co n-th))))))
       events)))

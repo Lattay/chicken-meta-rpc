@@ -3,6 +3,8 @@
         chicken.condition)
 (import srfi-18)
 
+(define log-port (make-parameter (current-error-port)))
+
 (define-syntax decr!
   (syntax-rules ()
     ((_ v)
@@ -18,12 +20,12 @@
      (set! v (+ v amount)))))
 
 (define (logger context . args)
-  (display (string-append "[" context "] ") (current-error-port))
+  (display (string-append "[" context "] ") (log-port))
   (let loop ((rest args))
     (if (null? rest)
-        (newline (current-error-port))
+        (newline (log-port))
         (begin
-          (display (car rest) (current-error-port))
+          (display (car rest) (log-port))
           (display " ")
           (loop (cdr rest))))))
 
@@ -58,6 +60,9 @@
                                     "Error: "
                                     (get-exn-msg e)))))
        body ...))))
+
+(define (triplet a b c)
+  `(,a ,b . ,c))
 
 (define (time-stamp)
   (time->seconds (current-time)))

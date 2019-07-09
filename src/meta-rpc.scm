@@ -1,4 +1,6 @@
-(module meta-rpc (make-server
+(module meta-rpc (log-port
+                  
+                  make-server
                   server-min-loop-time
                   server-max-threads
                   server-max-connections
