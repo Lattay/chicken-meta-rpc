@@ -20,6 +20,7 @@
       `(timeout id ,id))))
 
 (define (client-request requests type call-id msg-format method-name args)
+  ; add a request/notification to the queue 
   (mailbox-send!
     requests
     (cons call-id 
@@ -56,7 +57,7 @@
       (let ((tmp #f))
         (mutex-lock! lock)
         (set! tmp counter)
-        (incr! counter)
+        (set! counter (add1 counter))
         (mutex-unlock! lock)
         tmp))))
 
@@ -72,21 +73,9 @@
                     (when err (hash-table-set! responses id (cons 'error err))))
       (send-requests-one-co transport requests responses connection))))
 
-(define (receive-responses-one-co responses events connection msg-format)
-  (when (char-ready? (car (connection)))
-    (let ((msg (rpc-read msg-format (car (connection)))))
-      (case (car msg)
-        ((response)
-         (hash-table-set! responses (cadr msg) (cons 'response msg)))
-        ((notify)
-         (mailbox-send! events msg))
-        (else ; should never happen
-          '())))
-    (receive-responses-one-co responses events connection msg-format)))
-
 (define (send-requests-multi-co transport requests responses connections)
   (unless (or (mailbox-empty? requests)
-              (> (client-max-connections) (hash-table-size connections)))
+              (< (client-max-connections) (hash-table-size connections)))
     (let-values (((in out) (connect transport)))
       (let* ((req (mailbox-receive! requests))
              (id (car req))
@@ -97,32 +86,69 @@
         (close-output-port out))
       (send-requests-multi-co transport requests responses connections))))
 
+(define (read-msg msg-format port)
+  (condition-case (rpc-read msg-format port)
+    ((exn rpc invalid)
+     '(error "invalid message"))
+    ((exn i/o)
+     '(error "i/o failure"))
+    (e (exn)
+       `(error ,e))))
+
+(define (receive-responses-one-co responses events connection msg-format)
+  (when (char-ready? (car (connection)))
+    (let ((msg (read-msg msg-format (car (connection)))))
+      (case (car msg)
+        ((response)
+         (hash-table-set! responses (cadr msg) (cdddr msg)))
+        ((notify)
+         (mailbox-send! events msg))
+        ((error)
+         (mailbox-send! events msg))
+        (else ; should not happend
+          (let ((m (format "fuck this ~A!" msg)))
+            (signal
+              (condition
+                `(exn location receive-response message ,m)))))))
+    (receive-responses-one-co responses events connection msg-format)))
+
 (define (receive-responses-multi-co responses connections msg-format)
   (hash-table-remove!
     connections
     (lambda (id co)
       (if (char-ready? (car co))
-          (begin
-            (hash-table-set! responses id (cons 'response (rpc-read msg-format (car co))))
+          (let ((msg (read-msg msg-format (car co))))
+            (match msg
+              ((response id method err result)
+               (hash-table-set! responses id (list err result)))
+              ((error err)
+               (hash-table-set! responses id (list err '())))
+              (any
+                (signal
+                  (condition
+                    `(exn location receive-response message ,any)))))
             (close-input-port (car co))
             #t)
           #f))))
 
-(define (client-worker transport msg-format requests responses events)
+(define (client-worker transport msg-format requests responses events stop)
   (let* ((one-co (not (one-shot? transport))) ; one-shot connectionS or multi-shot connection_
          (connection (if one-co (make-parameter #f) #f))
          (connections (if one-co #f (make-hash-table))))
     (let loop ((t-prev (time-stamp)))
-      (thread-sleep! (+ (client-min-loop-time) (time-stamp)))
-      (if one-co
+      (if (stop)
+          '()
           (let ((t-now (time-stamp)))
-            (send-requests-one-co transport requests responses connection)
-            (receive-responses-one-co responses events connection msg-format)
-            (loop t-now))
-          (let ((t-now (time-stamp)))
-            (send-requests-multi-co transport requests responses connections)
-            (receive-responses-multi-co responses connections msg-format)
-            (loop t-now))))))
+            (thread-sleep! (- (+ (client-min-loop-time) t-prev) t-now))
+            (if one-co
+                (begin
+                  (send-requests-one-co transport requests responses connection)
+                  (receive-responses-one-co responses events connection msg-format)
+                  (loop t-now))
+                (begin
+                  (send-requests-multi-co transport requests responses connections)
+                  (receive-responses-multi-co responses connections msg-format)
+                  (loop t-now))))))))
 
 (define (poll-events! events)
   (let loop ((acc '()))
@@ -130,13 +156,25 @@
         acc
         (loop (cons (mailbox-receive! events) acc)))))
 
-(define (make-client transport msg-format)
-  (let ((requests (make-mailbox))
-        (responses (make-hash-table))
-        (events (make-mailbox)))
+(define (make-client transport msg-format #!optional (autostart #t))
+  (let* ((requests (make-mailbox))
+         (responses (make-hash-table))
+         (events (make-mailbox))
+         (stop-client (make-parameter #f))
+         (start-client (make-thread
+                         (lambda ()
+                           (client-worker transport msg-format requests
+                                          responses events stop-client))
+                         'client-worker)))
+    (if autostart
+        (thread-start! start-client))
     (match-lambda*
       (('start) ; start event loop thread
-       (thread-start! (lambda () (client-worker transport msg-format requests responses events))))
+       (if (not autostart)
+           (thread-start! start-client)))
+
+      (('stop)
+       (stop-client #t))
 
       (('call method-name args) ; send a request
        (let ((call-id (gen-id)))

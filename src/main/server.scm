@@ -176,11 +176,11 @@
       (lambda ()
         (let loop ((t-prev (time-stamp)) (connections '()) (n-co 0) (n-th 0))
           ; prevent the loop from using 100% CPU for nothing
-          (thread-sleep! (+ (server-min-loop-time) t-prev (- (time-stamp))))
-        (let ((t-now (time-stamp)))
+          (let ((t-now (time-stamp)))
+            (thread-sleep! (+ (server-min-loop-time) t-prev (- t-now)))
             (when events
-                ; broadcast event to all connected clients
-                (send-events events connections msg-format))
+              ; broadcast event to all connected clients
+              (send-events events connections msg-format))
             ; each response ready to send correspond to a finished thread 
             (decr! n-th (send-responses responses close-co msg-format))
             (let-values (((connections n-co) (sweep-connections connections)))
