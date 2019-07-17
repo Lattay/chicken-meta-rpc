@@ -23,7 +23,7 @@ unit: test/unit.scm test/server-unit.scm src/main/server.scm test/pseudo-format.
 	$(CSC) test/unit.scm -o unit && ./unit
 
 # main module
-meta-rpc.so: src/meta-rpc.scm src/main/client.scm src/main/server.scm src/main/common.scm meta-rpc.interface.so
+meta-rpc.so: src/meta-rpc.scm src/main/client.scm src/main/server.scm src/main/common.scm src/main/actor.scm meta-rpc.interface.so
 	$(CSC) -X meta-rpc.interface.so -s -j meta-rpc -o $@ $<
 	$(CSC) meta-rpc.import.scm -dynamic
 

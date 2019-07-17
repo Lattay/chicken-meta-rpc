@@ -1,10 +1,13 @@
 (import scheme
-        chicken.base)
+        chicken.base
+        chicken.condition)
 (import matchable
         meta-rpc.interface
         srfi-18
         srfi-69
-        mailbox)
+        queues)
+
+(include "src/main/actor.scm")
 
 ; public hash table to register methods
 (define *rpc-methods* (make-hash-table))
@@ -13,15 +16,21 @@
 (define server-max-threads (make-parameter 5))
 (define server-max-connections (make-parameter 10))
 
-(define-record conn lock in out)
+;;;;;;;;;;;;;;;;;;;; Records ;;;;;;;;;;;;;;;;;;;;
 
-(define (locked? lock)
-  (case (mutex-state lock)
-    ((not-owned) #f)
-    ((abandoned) #f)
-    ((not-abandoned) #f)
-    (else #t)))
+(define-record-type conn
+  (make-conn in out)
+  conn?
+  (in conn-in)
+  (out conn-out)
+  (closed conn-closed? conn-close))
 
+(define (close-connection co)
+  (close-input-port (conn-in co))
+  (close-output-port (conn-out co))
+  (conn-close co #t))
+
+;;;;;;;;;;;;;;;;;;;; Tools ;;;;;;;;;;;;;;;;;;;;
 (define (make-rpc-error type #!key (message "") (data '()) (code #f))
   (let ((err (make-hash-table)))
     (hash-table-set! err "data" '())
@@ -57,21 +66,13 @@
         (hash-table-set! err "code" code)
         (hash-table-set! err "message" message)
         (hash-table-set! err "data" data)))
-      err))
+    err))
 
 (define (make-app-error err)
   (make-rpc-error '()
                   code: (get-condition-property err 'app 'code)
                   data: (get-condition-property err 'app 'data)
                   message: (get-condition-property err 'app 'message)))
-
-(define (first-ready connections)
-  (if (null? connections)
-      (values #f '())
-      (let ((co (car connections)) (rest (cdr connections)))
-        (if (and (not (locked? (conn-lock co))) (char-ready? (conn-in co)))
-            (values co rest)
-            (first-ready rest)))))
 
 (define (call-method name params)
   ; call method and handle errors
@@ -91,12 +92,12 @@
   ; should not happen
   (match-lambda*
     ((('request id method-name params))
-     (triplet id method-name (call-method method-name params)))
+     `(,id ,method-name . ,(call-method method-name params)))
     ((('notification method-name params))
      (call-method method-name params)
      '())
     (any
-     (list -1 "invalid" (make-rpc-error 'invalid-request) '()))))
+      (list -1 "invalid" (make-rpc-error 'invalid-request) '()))))
 
 (define (read-message msg-format input)
   ; parse request message and handle error
@@ -109,109 +110,197 @@
     (e (exn)
        (values (make-rpc-error 'server-error data: e) #f))))
 
-(define (server-worker close-co msg-format lock input output responses)
-  ; thread handling an incoming message
-  (let ((result
-          (begin
-            (mutex-lock! lock)
-            (let-values (((err message) (read-message msg-format input)))
-              (mutex-unlock! lock)
-              (if err
-                  (list -1 "invalid" err '())
-                  (handle-request message))))))
-    (unless (null? result)
-      (mailbox-send! responses (triplet lock output result))))
-  (when close-co
-    (close-input-port input)))
+;;;;;;;;;;;;;;;;;;;; Actors ;;;;;;;;;;;;;;;;;;;;
 
-(define (handle-incoming-msg connections responses close-co n-th msg-format)
-  ; recursively find the first connection ready to deliver a message
-  ; and start a thread to handle it
-  (let-values (((co rest) (first-ready connections)))
-    (if (and co (< n-th (server-max-threads)))
-        (let ((lock (conn-lock co)) (input (conn-in co)) (output (conn-out co)))
-          (thread-start!
-            (lambda ()
-              (server-worker close-co msg-format lock input output responses)))
-          (handle-incoming-msg rest responses (add1 n-th) (server-max-threads) msg-format))
-        n-th)))
+; Connection store
+(define-class <connection-store> (<actor>)
+  ((connections (make-queue))
+   (max (server-max-connections))
+   scheduler))
 
-(define (sweep-connections connections)
-  ; remove closed connections from the connections list
-  (let loop ((rest connections) (kept '()) (n-kept 0))
-    (if (null? rest)
-        (values kept n-kept)
-        (let ((lock (conn-lock (car rest)))
-              (in (conn-in (car rest)))
-              (out (conn-out (car rest))))
-          (if (and (port-closed? in) (port-closed? out) (not (locked? lock)))
-              (loop (cdr rest)
-                    kept
-                    n-kept)
-              (loop (cdr rest)
-                    (cons (car rest) kept)
-                    (add1 n-kept)))))))
+(define-method (handle (self <connection-store>) msg data)
+  (case msg
+    ((store-connection)
+     (let ((co data))
+       (assert (and 'store-connection (conn? co)))
+       (queue-add! (slot-value self 'connections)  co)))
 
-(define (send-responses responses close-co msg-format)
-  ; send all pending responses to clients
-  (let loop ((sent 0))
-    (if (mailbox-empty? responses)
-        sent
-        (let* ((mail (mailbox-receive! responses))
-               (lock (car mail))
-               (output (cadr mail))
-               (message (cddr mail)))
-          (mutex-lock! lock)
-          (log-errors "writing/response"
-                      (rpc-write-response msg-format output message))
-          (mutex-unlock! lock)
-          (when close-co
-              (close-output-port output))
-          (loop (add1 sent))))))
+    ((ask-for-space)
+     (let ((who data))
+       (if (> (slot-value self 'max) (queue-length (slot-value self 'connections)))
+           (send who 'new-connection '())
+           (send self 'ask-for-space who))))
 
-(define (send-events events connections msg-format)
-  ; broadcast all pending events to all connected clients
-  (unless (mailbox-empty? events)
-    (let loop ((rest connections))
-      (unless (null? rest)
-          (let* ((output (conn-out (car rest)))
-                 (event (mailbox-receive! events))
-                 (method-name (car event))
-                 (args (cdr event)))
-            (log-errors "writing/notification"
-                        (rpc-write-notification msg-format output
-                                    (list method-name args)))
-            (loop (cdr rest)))))))
+    ((check-connections)
+     (let loop ((rest (queue-length (slot-value self 'connections))))
+       (if (zero? rest)
+           0
+           (let ((co (queue-remove! (slot-value self 'connections))))
+             (if (char-ready? (conn-in co))
+                 (send (slot-value self 'scheduler) 'new-message co)
+                 (begin
+                   (queue-add! (slot-value self 'connections) co)
+                   (loop (sub1 rest))))))))
 
-(define (nop . args) '())
-(define (make-server transport msg-format #!optional (debug nop))
-  (assert (and 'is-a-msg-format (message-format? msg-format)))
-  (let* ((responses (make-mailbox))
-         (close-co (one-shot? transport))
-         (events (and (not close-co) (make-mailbox))))
+    ((clean-connections)
+     (let loop ((rest (queue-length (slot-value self 'connections))))
+       (unless (zero? rest)
+         (let ((co (queue-remove! (slot-value self 'connections))))
+           (unless (or
+                     (conn-closed? co)
+                     (and (port-closed? (conn-in co)) (port-closed? (conn-out co))))
+             (queue-add! (slot-value self 'connections) co))
+           (loop (sub1 rest))))))
+    (else
+      (call-next-method))))
+
+(define (make-connection-store scheduler)
+  (make <connection-store> 'scheduler scheduler))
+
+; Scheduler
+(define-class <scheduler> (<actor>)
+  ((workers (make-vector (server-max-threads) #f))
+   format
+   one-shot
+   connection-store))
+
+(define (make-scheduler msg-format one-shot)
+  (make <scheduler> 'format msg-format 'one-shot one-shot))
+
+(define-method (set-connection-store! (self <scheduler>) (cst <connection-store>))
+  (set! (slot-value self 'connection-store) cst))
+
+(define-method (handle (self <scheduler>) msg data)
+  (case msg
+    ((new-message)
+     (handle-new-message self data))
+    ((new-event)
+     '())
+    ((task-error)
+     (let ((co (car data)) (err (car data)))
+       (send (slot-value self 'connection-store) 'store-connection co)))
+    ((task-done)
+     (let ((co (car data)) (res (car data)))
+       (send (slot-value self 'connection-store) 'store-connection co)))
+    (else
+      (call-next-method))))
+
+(define-method (handle-new-message (self <scheduler>) co)
+  (let* ((workers (slot-value self 'workers))
+         (end (vector-length workers)))
+    (let loop ((i 0))
+      (if (> end i)
+          (send self 'new-message co)
+          (let ((this-wk (vector-ref workers i)))
+            (if this-wk
+                (let ((busy (car this-wk)) (wk (cdr this-wk)))
+                  (if (busy)
+                      (loop (add1 i))
+                      (send wk 'new-message co)))
+                (let ((wk (make-worker
+                            self
+                            (slot-value self 'format)
+                            (slot-value self 'one-shot))))
+                  (vector-set! workers i (cons (make-parameter #t) wk))
+                  (send wk 'new-message co))))))))
+
+
+; Workers
+(define-class <worker> (<actor>)
+  (parent format one-shot))
+
+(define (make-worker parent msg-format one-shot)
+  (let ((wk (make <worker> 'parent parent 'format msg-format 'one-shot one-shot)))
+    (thread-start! (lambda () (work wk)))
+    wk))
+
+(define-method (handle (self <worker>) msg data)
+  (case msg
+    ((new-message)
+     (handle-new-message self data))
+    ((send-event-to)
+     (handle-send-event self (car data) (cdr data)))
+    (else
+      (call-next-method))))
+
+(define-method (handle-new-message (self <worker>) co)
+  (let-values (((err msg) (read-message (slot-value self 'msg-format) (conn-in co))))
+    (if err
+        (send (slot-value self 'parent) 'task-error (cons self err))
+        (let ((res (handle-request msg)))
+          (if (not (null? res))
+              (log-errors "writing/response"
+                          (rpc-write-response (slot-value self 'msg-format ) (conn-out co) res)))
+          (when (slot-value self 'one-shot)
+            (close-connection co))
+          (send (slot-value self 'parent) 'task-done (cons self #t))))))
+
+(define-method (handle-send-event (self <worker>) dest event)
+  '())
+
+; Transport listener
+
+(define-class <listener> (<actor>)
+  (transport connection-store))
+
+(define (make-listener transport cs)
+  (make <listener> 'transport transport 'connection-store cs))
+
+(define-method (handle (self <listener>) msg data)
+  (case msg
+    ((check-transport)
+     (if (ready? (slot-value self 'transport))
+         (send (slot-value self 'connection-store) 'ask-for-space self)))
+    ((new-connection)
+     (let-values (((in out) (accept (slot-value self 'transport))))
+       (send (slot-value self 'connection-store) 'store-connection (make-conn in out))))
+    (else
+      (call-next-method))))
+
+; Master
+
+(define-class <master> (<actor>)
+  (sch cst lis))
+
+(define (make-master sch cst lis)
+  (make <master> 'sch sch 'cst cst 'lis lis))
+
+(define-method (handle (self <master>) msg data)
+  (case msg
+    ((kill-all)
+     (send (slot-value self 'sch) 'kill-all '())
+     (send (slot-value self 'cst) 'stop '())
+     (send (slot-value self 'lis) 'stop '()))
+    ((run)
+     (let ((i data))
+       (send (slot-value self 'lis) 'check-transport '())
+       (send (slot-value self 'cst) 'check-connections '())
+       (if (= i 50)
+           (begin
+             (send (slot-value self 'cst) 'clean-connections '())
+             (send self 'run 0))
+           (send self 'run (add1 i)))
+       (thread-sleep! (server-min-loop-time))))
+    ((new-event)
+     '())
+    (else
+      (call-next-method))))
+
+
+;;;;;;;;;;;;;;;;;;;; Main entry point ;;;;;;;;;;;;;;;;;;;;
+(define (make-server transport msg-format #!optional (debug (lambda args '())))
+  (let* ((one-shot (one-shot? transport))
+         (sch (make-scheduler msg-format one-shot))
+         (cst (make-connection-store sch))
+         (lis (make-listener transport cst))
+         (master (make-master sch cst lis)))
+    (set-connection-store! sch cst)
     (values
-      ; return 2 values: the server main thread ready to be launched and the event mailbox
       (lambda ()
-        (let loop ((t-prev (time-stamp)) (connections '()) (n-co 0) (n-th 0))
-          (debug connections n-co n-th)
-          ; prevent the loop from using 100% CPU for nothing
-          (let ((t-now (time-stamp)))
-            (thread-sleep! (+ (server-min-loop-time) t-prev (- t-now)))
-            (when events
-              ; broadcast event to all connected clients
-              (send-events events connections msg-format))
-            ; each response ready to send correspond to a finished thread 
-            (decr! n-th (send-responses responses close-co msg-format))
-            (let-values (((connections n-co) (sweep-connections connections)))
-              ; open new threads for incoming messages
-              (set! n-th (handle-incoming-msg connections responses close-co n-th msg-format))
-              ; handle one of the incoming new connection
-              (if (and (ready? transport) (< n-co (server-max-connections)))
-                  (log-errors "new conn"
-                              (let-values (((new-in new-out) (accept transport)))
-                                (loop t-now (cons
-                                              (make-conn (make-mutex) new-in new-out)
-                                              connections)
-                                      (add1 n-co) n-th)))
-                  (loop t-now connections n-co n-th))))))
-      events)))
+        (thread-start! (lambda () (work cst)))
+        (thread-start! (lambda () (work lis)))
+        (thread-start! (lambda () (work sch)))
+        (thread-start! (lambda () (work master)))
+        (send master 'run 0))
+      (lambda (event)
+        (send master 'new-event event)))))
