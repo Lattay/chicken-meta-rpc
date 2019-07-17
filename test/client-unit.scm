@@ -2,6 +2,7 @@
 (import test srfi-69 srfi-18 mailbox)
 
 (load "test/tunnel.scm")
+(load "test/pseudo-transport.scm")
 (load "test/pseudo-format.scm")
 
 (include "src/main/common.scm")
@@ -76,8 +77,8 @@
     (assert (char-ready? in))
     (test "one-co response: " '(() (1 2 3))
       (begin
-          (receive-responses-one-co resp mb (make-parameter (cons in out)) msg-format)
-          (hash-table-ref/default resp 5 #f)
+        (receive-responses-one-co resp mb (make-parameter (cons in out)) msg-format)
+        (hash-table-ref/default resp 5 #f)
         ))
     )
   )

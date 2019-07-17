@@ -2,4 +2,4 @@
 *.c
 *.import.scm
 run
-unit
+unit-*

@@ -2,7 +2,9 @@
         chicken.base
         chicken.format
         chicken.condition)
-(import srfi-18
+(import matchable
+        meta-rpc.interface
+        srfi-18
         srfi-69
         mailbox)
 

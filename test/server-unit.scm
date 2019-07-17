@@ -8,66 +8,72 @@
 (include "src/main/common.scm")
 (include "src/main/server.scm")
 
+
+; debug actor
+(define-class <debug> (<actor>)
+  ((logs (make-mailbox))))
+
+(define-method (work (self <debug>) timeout)
+  (let ((start (time-stamp)))
+    (let loop ()
+      (let ((m (mailbox-receive! (slot-value self 'private-mailbox) 1 #f)))
+        (if m
+            (handle self (car m) (cdr m))))
+      (if (> timeout (- (time-stamp) start))
+          (loop)))))
+
+(define-method (handle (self <debug>) msg data)
+  (let ((info (format "Received message ~A with data ~A\n" msg data)))
+    (mailbox-send! (slot-value self 'logs) info)
+    (display info)))
+
+(define-method (flush-log (self <debug>))
+  (let loop ()
+    (unless (mailbox-empty? (slot-value self 'logs))
+      (mailbox-receive! (slot-value self 'logs))
+      (loop))))
+
+(define-method (next-log (self <debug>))
+  (if (mailbox-empty? (slot-value self 'logs))
+      #f
+      (mailbox-receive! (slot-value self 'logs))))
+
+;
+(define (make-multi-thread-parameter value)
+  (let ((val value))
+        (lambda arg
+          (when (not (null? arg))
+              (set! val (car arg)))
+          val)))
+
 (define msg-format (make-pseudo-format))
+(define debug (make <debug>))
+(define-values (in out) (make-tunnel-port))
+
+(define foo-a (make-multi-thread-parameter #f))
+(define foo-b (make-multi-thread-parameter #f))
+(hash-table-set! *rpc-methods* "foo" (lambda (a b)
+                                       (foo-a a)
+                                       (foo-b b)
+                                       (list b a)))
 
 (test-group "test-server"
-  (test-group "server sending"
-    (define-values (in out) (make-tunnel-port))
-    (define responses (make-mailbox))
-    (define events (make-mailbox))
+  (test-group "worker"
+    (define wk (make-worker debug msg-format #f))
+    (thread-start! (lambda () (work wk)))
+    (test "message" '(response 1 "foo" () (2 1))
+      (let ()
+        (rpc-write-request msg-format out '(1 "foo" (1 2)))
+        (send wk 'new-message (make-conn in out))
+        (work debug 2)
+        (rpc-read msg-format in)))
+    (flush-log debug)
+    (test "invalid message" "Received message task-error with data *"
+      (let ()
+        (rpc-write-request msg-format out '("a" "b" "c"))
+        (send wk 'new-message (make-conn in out))
+        (work debug 2)
+        (next-log debug)))
 
-    (test "send-responses" (list 'response 5 "foo" '() '(5))
-      (begin
-        (mailbox-send! responses (cons out (list 5 "foo" '() '(5))))
-        (send-responses responses #f msg-format)
-        (let ((resp (rpc-read msg-format in)))
-          resp)))
-
-    (test "send-responses with errors" (list 'response 5 "bar" '(fatal) '())
-      (begin
-        (mailbox-send! responses (cons out (list 5 "bar" '(fatal) '())))
-        (send-responses responses #f msg-format)
-        (let ((resp (rpc-read msg-format in)))
-          resp)))
-
-    (test "send-events" (list 'notification "baz" '(4 5 6))
-      (begin
-        (mailbox-send! events (list "baz" 4 5 6))
-        (send-events events (list (cons #f out)) msg-format)
-        (rpc-read msg-format in))))
-
-  (test-group "server internals"
-    (define-values (in1 out1) (make-tunnel-port))
-    (define-values (in2 out2) (make-tunnel-port))
-    (define-values (in3 out3) (make-tunnel-port))
-    (define connections (list
-                          (cons in1 out1)
-                          (cons in2 out2)
-                          (cons in3 out3)))
-
-    (test "first-ready" (cons in2 out2)
-      (begin
-        (rpc-write-notification msg-format out2 (list 5 "foo" '(5 4 6)))
-        (rpc-write-notification msg-format out3 (list 5 "foo" '(5 4 6)))
-        (let-values (((co rest) (first-ready connections)))
-          co)))
-
-    (test "sweep-connections" (cons (list (cons in2 out2)) 1)
-      (begin
-        (close-input-port in1)
-        (close-input-port in3)
-        (close-output-port out1)
-        (close-output-port out3)
-        (let-values (((kept n-kept) (sweep-connections connections)))
-          (cons kept n-kept))))
-
-    (test "call-method" (list '() '(5 4 6))
-      (begin
-        (hash-table-set! *rpc-methods* "foo" (lambda (a b c) (list c b a)))
-        (call-method "foo" '(6 4 5))))
-
-    (test "handle-request" (list 5 "foo" '() '(3 2 1))
-      (handle-request (list 'request 5 "foo" '(1 2 3))))
-
-    (test "handle-request notification" '()
-      (handle-request (list 'notification "foo" '(1 2 3))))))
+    (send wk 'stop '())
+    ))

@@ -224,13 +224,13 @@
       (call-next-method))))
 
 (define-method (handle-new-message (self <worker>) co)
-  (let-values (((err msg) (read-message (slot-value self 'msg-format) (conn-in co))))
+  (let-values (((err msg) (read-message (slot-value self 'format) (conn-in co))))
     (if err
         (send (slot-value self 'parent) 'task-error (cons self err))
         (let ((res (handle-request msg)))
           (if (not (null? res))
               (log-errors "writing/response"
-                          (rpc-write-response (slot-value self 'msg-format ) (conn-out co) res)))
+                          (rpc-write-response (slot-value self 'format ) (conn-out co) res)))
           (when (slot-value self 'one-shot)
             (close-connection co))
           (send (slot-value self 'parent) 'task-done (cons self #t))))))
