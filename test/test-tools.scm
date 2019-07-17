@@ -9,32 +9,48 @@
 (include "test/pseudo-transport.scm")
 (include "test/pseudo-format.scm")
 
+(define (flush-input port)
+  (when (char-ready? port)
+    (read-char port)
+    (flush-input port)))
+
 (test-group "test-test"
   (test-group "tunnel"
     (define-values (in out) (make-tunnel-port))
-    (test "write-read" '(#\o #\l #\l #\e #\h)
-      (begin
-        (write-char #\h out)
-        (write-char #\e out)
-        (write-char #\l out)
-        (write-char #\l out)
-        (write-char #\o out)
-        (let loop ((acc '()))
-          (let ((c (read-char in)))
-            (if (eq? #!eof c)
-              acc
-              (loop (cons c acc)))))))
+    (define-syntax test-write-read
+      (syntax-rules ()
+        ((_ name msg)
+         (test (format "write-read ~A" name) msg
+           (begin
+             (write-string msg #f out)
+             (list->string
+               (reverse
+                 (let loop ((acc '()))
+                   (let ((c (read-char in)))
+                     (if (eq? #!eof c)
+                         acc
+                         (loop (cons c acc))))))))))))
+    (test-write-read "1" "hello")
     (test "not char-ready" #f (char-ready? in))
     (test "char-ready" #t (begin (write-char #\o out) (char-ready? in)))
+    (flush-input in)
+    (test-write-read "2" "such test, much code")
+    (test-write-read "unicode" "Hébété, nous ne pûmes réagirent.")
     )
 
   (test-group "format"
     (define fmt (make-pseudo-format))
     (define-values (in out) (make-tunnel-port))
-    (test "write-read request" (list 'request 2 "foo" '() '(5))
+    (test "write-read request" (list 'request 2 "foo" '(5))
       (begin
-        (rpc-write-request fmt out (list 2 "foo" '() '(5)))
-        (rpc-read fmt in))))
+        (rpc-write-request fmt out (list 2 "foo" '(5)))
+        (rpc-read fmt in)))
+    (flush-input in)
+    (test-error "read error" (rpc-read fmt in))
+    (test-error "read invalid"
+                (begin
+                  (rpc-write-request fmt out (list "foo"))
+                  (rpc-read fmt in))))
 
   (test-group "transport"
     (define tr (make-pseudo-transport #f))

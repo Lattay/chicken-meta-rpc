@@ -21,7 +21,7 @@
     ((stop)
      (set! (slot-value self 'private-continue) #f))
     (else
-      (signal (condition `(exn location <actor>:handle
+      (signal (condition `(exn location ,(string->symbol (format "~A:handle" (class-name (class-of self))))
                                message ,(format "Unexpected message received: ~A" msg))
                          `(actor unexpected-message ,msg))))))
 

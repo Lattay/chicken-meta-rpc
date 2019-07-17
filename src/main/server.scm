@@ -22,13 +22,11 @@
   (make-conn in out)
   conn?
   (in conn-in)
-  (out conn-out)
-  (closed conn-closed? conn-close))
+  (out conn-out))
 
 (define (close-connection co)
   (close-input-port (conn-in co))
-  (close-output-port (conn-out co))
-  (conn-close co #t))
+  (close-output-port (conn-out co)))
 
 ;;;;;;;;;;;;;;;;;;;; Tools ;;;;;;;;;;;;;;;;;;;;
 (define (make-rpc-error type #!key (message "") (data '()) (code #f))
@@ -70,9 +68,9 @@
 
 (define (make-app-error err)
   (make-rpc-error '()
-                  code: (get-condition-property err 'app 'code)
-                  data: (get-condition-property err 'app 'data)
-                  message: (get-condition-property err 'app 'message)))
+                  code: (get-condition-property err 'app 'code '())
+                  data: (get-condition-property err 'app 'data '())
+                  message: (get-condition-property err 'app 'message '())))
 
 (define (call-method name params)
   ; call method and handle errors
@@ -129,7 +127,9 @@
      (let ((who data))
        (if (> (slot-value self 'max) (queue-length (slot-value self 'connections)))
            (send who 'new-connection '())
-           (send self 'ask-for-space who))))
+           (begin
+             (send self 'clean-connections '())
+             (send self 'ask-for-space who)))))
 
     ((check-connections)
      (let loop ((rest (queue-length (slot-value self 'connections))))
@@ -146,9 +146,7 @@
      (let loop ((rest (queue-length (slot-value self 'connections))))
        (unless (zero? rest)
          (let ((co (queue-remove! (slot-value self 'connections))))
-           (unless (or
-                     (conn-closed? co)
-                     (and (port-closed? (conn-in co)) (port-closed? (conn-out co))))
+           (unless (port-closed? (conn-out co))
              (queue-add! (slot-value self 'connections) co))
            (loop (sub1 rest))))))
     (else
@@ -177,11 +175,17 @@
     ((new-event)
      '())
     ((task-error)
-     (let ((co (car data)) (err (car data)))
-       (send (slot-value self 'connection-store) 'store-connection co)))
+     (let ((co (car data)) (id (cadr data)) (err (cddr data)))
+       ((car (vector-ref (slot-value self 'workers) id)) #f)  ; not busy
+       (if (slot-value self 'one-shot)
+           (close-connection co)
+           (send (slot-value self 'connection-store) 'store-connection co))))
     ((task-done)
-     (let ((co (car data)) (res (car data)))
-       (send (slot-value self 'connection-store) 'store-connection co)))
+     (let ((co (car data)) (id (cadr data)) (res (cddr data)))
+       ((car (vector-ref (slot-value self 'workers) id)) #f)  ; not busy
+       (if (slot-value self 'one-shot)
+           (close-connection co)
+           (send (slot-value self 'connection-store) 'store-connection co))))
     (else
       (call-next-method))))
 
@@ -196,44 +200,42 @@
                 (let ((busy (car this-wk)) (wk (cdr this-wk)))
                   (if (busy)
                       (loop (add1 i))
-                      (send wk 'new-message co)))
-                (let ((wk (make-worker
-                            self
-                            (slot-value self 'format)
-                            (slot-value self 'one-shot))))
+                      (begin
+                        (busy #t)
+                        (send wk 'new-message (cons i co)))))
+                (let ((wk (make-worker self (slot-value self 'format))))
                   (vector-set! workers i (cons (make-parameter #t) wk))
-                  (send wk 'new-message co))))))))
+                  (send wk 'new-message (cons i co)))))))))
 
 
 ; Workers
 (define-class <worker> (<actor>)
-  (parent format one-shot))
+  (parent format))
 
-(define (make-worker parent msg-format one-shot)
-  (let ((wk (make <worker> 'parent parent 'format msg-format 'one-shot one-shot)))
+(define (make-worker parent msg-format)
+  (let ((wk (make <worker> 'parent parent 'format msg-format)))
     (thread-start! (lambda () (work wk)))
     wk))
 
 (define-method (handle (self <worker>) msg data)
   (case msg
     ((new-message)
-     (handle-new-message self data))
+     (let ((id (car data)) (co (cdr data)))
+       (handle-new-message self id co)))
     ((send-event-to)
      (handle-send-event self (car data) (cdr data)))
     (else
       (call-next-method))))
 
-(define-method (handle-new-message (self <worker>) co)
+(define-method (handle-new-message (self <worker>) id co)
   (let-values (((err msg) (read-message (slot-value self 'format) (conn-in co))))
     (if err
-        (send (slot-value self 'parent) 'task-error (cons self err))
+        (send (slot-value self 'parent) 'task-error `(,id ,co . ,err))
         (let ((res (handle-request msg)))
-          (if (not (null? res))
-              (log-errors "writing/response"
-                          (rpc-write-response (slot-value self 'format ) (conn-out co) res)))
-          (when (slot-value self 'one-shot)
-            (close-connection co))
-          (send (slot-value self 'parent) 'task-done (cons self #t))))))
+          (unless (null? res)
+            (log-errors "writing/response"
+                        (rpc-write-response (slot-value self 'format ) (conn-out co) res)))
+          (send (slot-value self 'parent) 'task-done `(,id ,co . #t))))))
 
 (define-method (handle-send-event (self <worker>) dest event)
   '())
@@ -275,11 +277,7 @@
      (let ((i data))
        (send (slot-value self 'lis) 'check-transport '())
        (send (slot-value self 'cst) 'check-connections '())
-       (if (= i 50)
-           (begin
-             (send (slot-value self 'cst) 'clean-connections '())
-             (send self 'run 0))
-           (send self 'run (add1 i)))
+       (send self 'run (add1 i))
        (thread-sleep! (server-min-loop-time))))
     ((new-event)
      '())
