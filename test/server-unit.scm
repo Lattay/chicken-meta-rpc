@@ -149,4 +149,16 @@
             (car logged)
             (hash-table-ref/default (cdddr logged) "code" #f)))))
     (send wk 'stop '()))
+
+  (test-group "listener"
+    )
+
+  (test-group "connection-store"
+    )
+
+  (test-group "scheduler"
+    )
+
+  (test-group "master"
+    )
   )
