@@ -89,7 +89,7 @@
   (test-group "server chain"
     (define (debug co n-co n-th)
       (display (format "~A ~A\n" co n-th) (log-port)))
-    (define-values (server events) (make-server transport msg-format debug))
+    (define-values (server events stop-server) (make-server transport msg-format debug))
     (thread-start! (make-thread server 'server))
     (test "send-request" '(response 1 "foo" () (2 1))
           (let-values (((in out) (connect transport)))
@@ -98,12 +98,13 @@
             (if (char-ready? in)
                 (rpc-read msg-format in)
                 'no-response)))
+    (stop-server)
     )
 
   (test-group "server"
     (define (debug co n-co n-th)
       (display (format "~A ~A\n" co n-th) (log-port)))
-    (define-values (server events) (make-server transport msg-format debug))
+    (define-values (server events stop-server) (make-server transport msg-format debug))
     (thread-start! (make-thread server 'server))
     (test "send-request" '(response 1 "foo" () (2 1))
           (let-values (((in out) (connect transport)))
@@ -112,12 +113,13 @@
             (if (char-ready? in)
                 (rpc-read msg-format in)
                 'no-response)))
+    (stop-server)
     )
   ; (test-group "integrated"
   ;   (define (debug co n-co n-th)
   ;     (display (format "~A ~A\n" co n-th) (log-port)))
   ;   (define client (make-client transport msg-format))
-  ;   (define-values (server events) (make-server transport msg-format debug))
+  ;   (define-values (server events stop-server) (make-server transport msg-format debug))
   ;   (thread-start! (make-thread server 'server))
 
   ;   (test-group "sync-call foo"

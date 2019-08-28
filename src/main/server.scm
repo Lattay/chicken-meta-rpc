@@ -322,6 +322,6 @@
               (work master))))
       (lambda (event)
         (send master 'new-event event))
-      ; (lambda ()
-      ;   (send master 'kill-all))
+      (lambda ()
+        (send master 'kill-all))
       )))
