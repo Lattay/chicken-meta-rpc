@@ -7,11 +7,14 @@
  (synopsis "Multiple encoding rpc client and server implementation for CHICKEN")
  (components 
     (extension meta-rpc
+      (csc-options "-disable-interrupts")
       (source "src/meta-rpc.scm")
       (modules meta-rpc))
     (extension meta-rpc.interface
+      (csc-options "-disable-interrupts")
       (source "src/interface.scm")
       (module meta-rpc.interface))
     (extension meta-rpc.transport
+      (csc-options "-disable-interrupts")
       (source "src/transport/transport.scm")
       (module meta-rpc.transport))))
