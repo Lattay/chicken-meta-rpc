@@ -86,20 +86,6 @@
                       (thread-sleep! 1)
                       (loop (sub1 retry)))))))))
     )
-  (test-group "server chain"
-    (define (debug co n-co n-th)
-      (display (format "~A ~A\n" co n-th) (log-port)))
-    (define-values (server events stop-server) (make-server transport msg-format debug))
-    (thread-start! (make-thread server 'server))
-    (test "send-request" '(response 1 "foo" () (2 1))
-          (let-values (((in out) (connect transport)))
-            (rpc-write-request msg-format out '(1 "foo" (1 2)))
-            (thread-sleep! 2)
-            (if (char-ready? in)
-                (rpc-read msg-format in)
-                'no-response)))
-    (stop-server)
-    )
 
   (test-group "server"
     (define (debug co n-co n-th)

@@ -192,11 +192,10 @@
             (end (vector-length workers)))
        (let loop ((i 0))
          (when (> end i)
-           (display (vector-ref workers i))
-           (newline)
            (when (vector-ref workers i)
-             (send 'stop (cdr (vector-ref workers i)) '()))
-           (loop (add1 i))))))
+             (send (cdr (vector-ref workers i)) 'stop '()))
+           (loop (add1 i))))
+       (send self 'stop '())))
     (else
       (call-next-method))))
 
