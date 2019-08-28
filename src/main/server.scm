@@ -1,5 +1,6 @@
 (import scheme
         chicken.base
+        chicken.format
         chicken.random
         chicken.condition)
 (import matchable
@@ -199,8 +200,16 @@
     (else
       (call-next-method))))
 
+(define (vector-map fun vect)
+  (let ((end (vector-length vect)))
+    (let loop ((i 0) (acc '()))
+      (if (>= i end)
+          acc
+          (loop (add1 i) (cons (fun (vector-ref vect i)) acc))))))
+
 (define-method (handle-new-message (self <scheduler>) co)
   (let* ((workers (slot-value self 'workers))
+         (id (pseudo-random-integer 10000))
          (end (vector-length workers)))
     (let loop ((i 0))
       (if (> end i)
@@ -224,11 +233,13 @@
 
 (define (make-worker parent msg-format)
   (let ((wk (make <worker> 'parent parent 'format msg-format)))
-    (thread-start! (make-thread (lambda () (work wk))
-                                (symbol-append 'worker
-                                               (string->symbol
-                                                 (number->string
-                                                   (pseudo-random-integer 1000))))))
+    (thread-start!
+      (make-thread
+        (lambda () (work wk))
+        (symbol-append 'worker
+                       (string->symbol
+                         (number->string
+                           (pseudo-random-integer 1000))))))
     wk))
 
 (define-method (handle (self <worker>) msg data)
@@ -249,7 +260,7 @@
           (unless (null? res)
             (log-errors "writing/response"
                         (rpc-write-response (slot-value self 'format ) (conn-out co) res)))
-          (send (slot-value self 'parent) 'task-done `(,id ,co . #t))))))
+          (send (slot-value self 'parent) 'task-done `(,id ,co . ,res))))))
 
 (define-method (handle-send-event (self <worker>) dest event)
   '())
@@ -257,7 +268,7 @@
 ; Transport listener
 
 (define-class <listener> (<actor>)
-  (transport connection-store))
+  (transport connection-store (signal-ready (make-parameter #f))))
 
 (define (make-listener transport cs)
   (make <listener> 'transport transport 'connection-store cs))
@@ -265,10 +276,13 @@
 (define-method (handle (self <listener>) msg data)
   (case msg
     ((check-transport)
-     (if (ready? (slot-value self 'transport))
-         (send (slot-value self 'connection-store) 'ask-for-space self)))
+     (when (and (not ((slot-value self 'signal-ready)))
+                (ready? (slot-value self 'transport)))
+       ((slot-value self 'signal-ready) #t)
+       (send (slot-value self 'connection-store) 'ask-for-space self)))
     ((new-connection)
      (let-values (((in out) (accept (slot-value self 'transport))))
+       ((slot-value self 'signal-ready) #f)
        (send (slot-value self 'connection-store) 'store-connection (make-conn in out))))
     (else
       (call-next-method))))
@@ -292,7 +306,7 @@
        (send (slot-value self 'lis) 'check-transport '())
        (send (slot-value self 'cst) 'check-connections '())
        (send self 'run (add1 i))
-       (thread-sleep! (server-min-loop-time))))
+       (thread-sleep! 0.05)))
     ((new-event)
      '())
     (else

@@ -58,6 +58,7 @@
     (define-values (in-cli out-cli) (connect tr))
     (test "ready" #t (ready? tr))
     (define-values (in-serv out-serv) (accept tr))
+    (test "no longer ready" #f (ready? tr))
     (test "server-to-client-write" '(truc "foo" 56)
       (begin
         (write '(truc "foo" 56) out-serv)

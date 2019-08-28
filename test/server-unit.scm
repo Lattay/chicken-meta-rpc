@@ -231,13 +231,30 @@
           (begin
             (rpc-write-request msg-format outc '(1 "foo" (1 2)))
             (send sc 'new-message co)
-            (work debug 2)
-            (thread-sleep! 2)
+            (work debug 1)
             (let ((msg (next-log debug)))
               (if msg
                   (car msg)
                   #f))))
-    (send sc 'stop '()))
+    (test "new-message 2" 'store-connection
+          (begin
+            (rpc-write-request msg-format outc '(1 "foo" (5 1)))
+            (send sc 'new-message co)
+            (work debug 1)
+            (let ((msg (next-log debug)))
+              (if msg
+                  (car msg)
+                  #f))))
+    (test "handle-new-message" 'store-connection
+          (begin
+            (rpc-write-request msg-format outc '(1 "foo" (1 2)))
+            (handle-new-message sc co)
+            (work debug 1)
+            (let ((msg (next-log debug)))
+              (if msg (car msg) #f))))
+
+    (send sc 'stop '())
+            )
 
   (test-group "master"
     )

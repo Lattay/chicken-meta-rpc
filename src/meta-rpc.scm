@@ -1,10 +1,14 @@
 (module meta-rpc (log-port
+
+                  log-msg
                   
                   make-server
                   server-min-loop-time
                   server-max-threads
                   server-max-connections
                   *rpc-methods*
+
+                  <scheduler>
 
                   make-client
                   client-wait-sleep-time

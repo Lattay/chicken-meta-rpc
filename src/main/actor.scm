@@ -6,6 +6,8 @@
         mailbox)
 (include "src/main/common.scm")
 
+(define log-msg (make-parameter (lambda (self type msg data) '())))
+
 (define-class <actor> ()
   ((private-mailbox (make-mailbox)) (private-continue #t)))
 
@@ -24,6 +26,9 @@
             (if timeout (> timeout (- (time-stamp) start)) #t))
           (loop)))))
 
+(define-method (handle before: (self <actor>) msg data)
+  ((log-msg) self 'recv msg data))
+
 (define-method (handle (self <actor>) msg data)
   (case msg
     ((stop)
@@ -32,6 +37,9 @@
       (signal (condition `(exn location ,(string->symbol (format "~A:handle" (class-name (class-of self))))
                                message ,(format "Unexpected message received: ~A" msg))
                          `(actor unexpected-message ,msg))))))
+
+(define-method (send before: (self <actor>) msg data)
+  ((log-msg) self 'send msg data))
 
 (define-method (send (self <actor>) msg data)
   (mailbox-send! (slot-value self 'private-mailbox) (cons msg data)))
