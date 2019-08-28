@@ -86,37 +86,48 @@
                       (thread-sleep! 1)
                       (loop (sub1 retry)))))))))
     )
-  (test-group "server")
-  (test-group "integrated"
-    (define (debug co n-co n-th)
-      (display (format "~A ~A\n" co n-th) (log-port)))
-    (define client (make-client transport msg-format))
+  (test-group "server"
+     (define (debug co n-co n-th)
+       (display (format "~A ~A\n" co n-th) (log-port)))
     (define-values (server events) (make-server transport msg-format debug))
-    (thread-start! server)
-    (define-syntax test-sync-call-foo
-      (syntax-rules ()
-        ((_ client da db a b)
-         (test-group (format "sync-call foo ~A ~A" a b)
-           (test "result" `(() (,b ,a)) (client 'sync-call "foo" (list a b)))
-           (test "a" a (da))
-           (test "b" b (db))))))
-
-    (test-sync-call-foo client foo-a foo-b 4 5)
-    (test-sync-call-foo client foo-a foo-b '() '())
-    (test-sync-call-foo client foo-a foo-b "ok" "ko")
-    (test-sync-call-foo client foo-a foo-b '(1 2 3) '(4 5 6))
-    (test-sync-call-foo client foo-a foo-b 'patate 'poulet)
-
-    (test-group "sync-call bar"
-      (define-syntax test-sync-call-bar
-        (syntax-rules ()
-          ((_ client count)
-           (test (format "#~A" count) (list '() count) (client 'sync-call "bar" '())))))
-      (test-sync-call-bar client 1)
-      (test-sync-call-bar client 2)
-      (test-sync-call-bar client 3)
-      (test-sync-call-bar client 4))
+    (thread-start! (make-thread server 'server))
+    (test "send-request" '()
+          (let-values (((in out) (connect transport)))
+            (rpc-write-request msg-format out '(1 "foo" (1 2)))
+            (thread-sleep! 1)
+            (rpc-read msg-format in)))
     )
+  ; (test-group "integrated"
+  ;   (define (debug co n-co n-th)
+  ;     (display (format "~A ~A\n" co n-th) (log-port)))
+  ;   (define client (make-client transport msg-format))
+  ;   (define-values (server events) (make-server transport msg-format debug))
+  ;   (thread-start! (make-thread server 'server))
+
+  ;   (test-group "sync-call foo"
+  ;     (define-syntax test-sync-call-foo
+  ;       (syntax-rules ()
+  ;         ((_ client da db a b)
+  ;          (test-group (format "sync-call foo ~A ~A" a b)
+  ;            (test "result" `(() (,b ,a)) (client 'sync-call "foo" (list a b)))
+  ;            (test "a" a (da))
+  ;            (test "b" b (db))))))
+  ;     (test-sync-call-foo client foo-a foo-b 4 5)
+  ;     (test-sync-call-foo client foo-a foo-b '() '())
+  ;     (test-sync-call-foo client foo-a foo-b "ok" "ko")
+  ;     (test-sync-call-foo client foo-a foo-b '(1 2 3) '(4 5 6))
+  ;     (test-sync-call-foo client foo-a foo-b 'patate 'poulet))
+
+  ;   (test-group "sync-call bar"
+  ;     (define-syntax test-sync-call-bar
+  ;       (syntax-rules ()
+  ;         ((_ client count)
+  ;          (test (format "#~A" count) (list '() count) (client 'sync-call "bar" '())))))
+  ;     (test-sync-call-bar client 1)
+  ;     (test-sync-call-bar client 2)
+  ;     (test-sync-call-bar client 3)
+  ;     (test-sync-call-bar client 4))
+  ;   )
   )
 
 (close-output-port (log-port))

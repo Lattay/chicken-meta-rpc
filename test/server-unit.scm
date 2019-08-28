@@ -124,7 +124,7 @@
         (flush-input in)
         (rpc-write-request msg-format out '(1 "foo" (1 2)))
         (send wk 'new-message `(0 . ,(make-conn in out)))
-        (work debug 2)
+        (work debug 1)
         (list (foo-a) (foo-b) (rpc-read msg-format in))))
     (flush-log debug)
     (test "unparsable message" '(task-error -32000)
@@ -132,7 +132,7 @@
         (flush-input in)
         (write-string "(\"a\" \"b\" \"c\"" #f out)
         (send wk 'new-message `(0 . ,(make-conn in out)))
-        (work debug 2)
+        (work debug 1)
         (let ((logged (next-log debug)))
           (list
             (car logged)
@@ -143,7 +143,7 @@
         (flush-input in)
         (write '(request "foo") out)
         (send wk 'new-message `(0 . ,(make-conn in out)))
-        (work debug 2)
+        (work debug 1)
         (let ((logged (next-log debug)))
           (list
             (car logged)
@@ -151,10 +151,52 @@
     (send wk 'stop '()))
 
   (test-group "listener"
-    )
+    (define transport (make-pseudo-transport #f))
+    (define lst (make-listener transport debug))
+    (thread-start! (lambda () (work lst)))
+    (test "check-transport ready" 'ask-for-space
+          (let-values (((in out) (connect transport)))
+            (rpc-write-request msg-format out '(1 "foo" (1 2)))
+            (send lst 'check-transport '())
+            (work debug 1)
+            (let ((logged (next-log debug)))
+              (car logged))))
+    (test "new-connection" 'store-connection
+          (begin
+            (send lst 'new-connection '())
+            (work debug 1)
+            (let ((logged (next-log debug)))
+              (car logged))))
+    (send lst 'stop '()))
 
   (test-group "connection-store"
-    )
+    (define cs (make-connection-store debug))
+    (define transport (make-pseudo-transport #f))
+    (define-values (in out) (accept transport))
+    (define co (make-conn in out))
+    (thread-start! (lambda () (work cs)))
+    (test "store-connection" 1
+          (begin
+            (send cs 'store-connection co)
+            (thread-sleep! 1)
+            (queue-length (slot-value cs 'connections))))
+    (test "ask-for-space" 'new-connection
+          (begin
+            (send cs 'ask-for-space debug)
+            (work debug 1)
+            (car (next-log debug))))
+    (test "check-connections not ready" '(#f 1)
+          (let-values (((in out) (connect transport)))
+            (send cs 'check-connections '())
+            (work debug 1)
+            (list (next-log debug) (queue-length (slot-value cs 'connections)))))
+    (test "check-connections ready" '(new-message 0)
+          (let-values (((in out) (connect transport)))
+            (rpc-write-request msg-format out '(1 "foo" (1 2)))
+            (send cs 'check-connections '())
+            (work debug 1)
+            (list (car (next-log debug)) (queue-length (slot-value cs 'connections)))))
+    (send cs 'stop '()))
 
   (test-group "scheduler"
     )
