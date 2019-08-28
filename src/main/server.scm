@@ -187,6 +187,16 @@
        (if (slot-value self 'one-shot)
            (close-connection co)
            (send (slot-value self 'connection-store) 'store-connection co))))
+    ((kill-all)
+     (let* ((workers (slot-value self 'workers))
+            (end (vector-length workers)))
+       (let loop ((i 0))
+         (when (> end i)
+           (display (vector-ref workers i))
+           (newline)
+           (when (vector-ref workers i)
+             (send 'stop (cdr (vector-ref workers i)) '()))
+           (loop (add1 i))))))
     (else
       (call-next-method))))
 
@@ -323,5 +333,5 @@
       (lambda (event)
         (send master 'new-event event))
       (lambda ()
-        (send master 'kill-all))
+        (send master 'kill-all '()))
       )))
