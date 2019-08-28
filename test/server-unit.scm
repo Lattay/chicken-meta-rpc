@@ -198,8 +198,46 @@
             (list (car (next-log debug)) (queue-length (slot-value cs 'connections)))))
     (send cs 'stop '()))
 
+  (test-group "worker"
+    (define wk (make-worker debug msg-format))
+    (define transport (make-pseudo-transport #f))
+    (define-values (in out) (accept transport))
+    (define-values (inc outc) (connect transport))
+    (define co (make-conn in out))
+    (test "new-message" '(task-done response 1 "foo" () (2 1))
+          (begin
+            (rpc-write-request msg-format outc '(1 "foo" (1 2)))
+            (send wk 'new-message (cons 5 co))
+            (work debug 1)
+            (cons (let ((msg (next-log debug)))
+                    (if msg
+                        (car msg)
+                        #f))
+                  (if (char-ready? inc)
+                      (rpc-read msg-format inc)
+                      '()))))
+
+    (send wk 'stop '()))
+
   (test-group "scheduler"
-    )
+    (define sc (make-scheduler msg-format #f))
+    (set-connection-store! sc debug)
+    (define transport (make-pseudo-transport #f))
+    (define-values (in out) (accept transport))
+    (define-values (inc outc) (connect transport))
+    (define co (make-conn in out))
+    (thread-start! (make-thread (lambda () (work sc)) 'sch))
+    (test "new-message" 'store-connection
+          (begin
+            (rpc-write-request msg-format outc '(1 "foo" (1 2)))
+            (send sc 'new-message co)
+            (work debug 2)
+            (thread-sleep! 2)
+            (let ((msg (next-log debug)))
+              (if msg
+                  (car msg)
+                  #f))))
+    (send sc 'stop '()))
 
   (test-group "master"
     )

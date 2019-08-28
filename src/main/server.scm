@@ -1,5 +1,6 @@
 (import scheme
         chicken.base
+        chicken.random
         chicken.condition)
 (import matchable
         meta-rpc.interface
@@ -165,7 +166,7 @@
 (define (make-scheduler msg-format one-shot)
   (make <scheduler> 'format msg-format 'one-shot one-shot))
 
-(define-method (set-connection-store! (self <scheduler>) (cst <connection-store>))
+(define-method (set-connection-store! (self <scheduler>) (cst <actor>))
   (set! (slot-value self 'connection-store) cst))
 
 (define-method (handle (self <scheduler>) msg data)
@@ -175,13 +176,13 @@
     ((new-event)
      '())
     ((task-error)
-     (let ((co (car data)) (id (cadr data)) (err (cddr data)))
+     (let ((id (car data)) (co (cadr data)) (err (cddr data)))
        ((car (vector-ref (slot-value self 'workers) id)) #f)  ; not busy
        (if (slot-value self 'one-shot)
            (close-connection co)
            (send (slot-value self 'connection-store) 'store-connection co))))
     ((task-done)
-     (let ((co (car data)) (id (cadr data)) (res (cddr data)))
+     (let ((id (car data)) (co (cadr data)) (res (cddr data)))
        ((car (vector-ref (slot-value self 'workers) id)) #f)  ; not busy
        (if (slot-value self 'one-shot)
            (close-connection co)
@@ -194,7 +195,6 @@
          (end (vector-length workers)))
     (let loop ((i 0))
       (if (> end i)
-          (send self 'new-message co)
           (let ((this-wk (vector-ref workers i)))
             (if this-wk
                 (let ((busy (car this-wk)) (wk (cdr this-wk)))
@@ -205,7 +205,8 @@
                         (send wk 'new-message (cons i co)))))
                 (let ((wk (make-worker self (slot-value self 'format))))
                   (vector-set! workers i (cons (make-parameter #t) wk))
-                  (send wk 'new-message (cons i co)))))))))
+                  (send wk 'new-message (cons i co)))))
+          (send self 'new-message co)))))
 
 
 ; Workers
@@ -214,7 +215,11 @@
 
 (define (make-worker parent msg-format)
   (let ((wk (make <worker> 'parent parent 'format msg-format)))
-    (thread-start! (lambda () (work wk)))
+    (thread-start! (make-thread (lambda () (work wk))
+                                (symbol-append 'worker
+                                               (string->symbol
+                                                 (number->string
+                                                   (pseudo-random-integer 1000))))))
     wk))
 
 (define-method (handle (self <worker>) msg data)
