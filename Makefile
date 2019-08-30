@@ -14,11 +14,38 @@ CSC_OPTIONS=-disable-interrupts
 
 all: meta-rpc.so meta-rpc.transport.so meta-rpc.interface.so
 
+help:
+	@echo "Usage: make [PREFIX=<chicken installation prefix>] [CSC=<csc command name>] <target>"
+	@echo "Available target:"
+	@echo "  Test targets:"
+	@echo "    test                   proceed to all tests"
+	@echo "    test-test              test the test tools"
+	@echo "    transport              test the transports layers"
+	@echo "    server-client          test server and client implementations"
+	@echo "    unit                   unit testing of server and client"
+	@echo "    unit-client            unit testing of the client"
+	@echo "    unit-server            unit testing of the server"
+	@echo ""
+	@echo "  Lib targets:"
+	@echo "    meta-rpc.so            main module"
+	@echo "    meta-rpc.transport.so  transport module"
+	@echo "    meta-rpc.interface.so  transport and format interface definition"
+	@echo ""
+	@echo "  Other targets:"
+	@echo "    all                    compile all libs"
+	@echo "    clean                  remove every build product"
+
 # Development test
+
+test: test-test server-client transport
+
 test-test: test/test-tools.scm test/tunnel.scm test/pseudo-format.scm test/pseudo-transport.scm meta-rpc.interface.so
 	$(CSC) $(CSC_OPTIONS) test/test-tools.scm -o run && ./run
 
-test: meta-rpc.so meta-rpc.transport.so meta-rpc.interface.so test/test.scm test/pseudo-format.scm test/pseudo-transport.scm
+transport: test/transport.scm test/pseudo-format.scm meta-rpc.interface.so meta-rpc.transport.so
+	$(CSC) $(CSC_OPTIONS) test/transport.scm -o run && ./run
+
+server-client: meta-rpc.so meta-rpc.transport.so meta-rpc.interface.so test/test.scm test/pseudo-format.scm test/pseudo-transport.scm
 	$(CSC) $(CSC_OPTIONS) test/test.scm -o run && ./run
 
 unit: unit-server unit-client
