@@ -65,3 +65,12 @@ Server class have three methods:
 - `(ready? serv)` return `#t` if a new connection is available
 - `(accept serv)` return a 2-values, input and output port for
   a new connection
+
+# Current project state
+
+The basic features of the client and the server are implemented and tested.
+Client can proceed to synchronous and asynchronous call and send notifications to the server.
+Server can register methods, listen for connections and run actions associated with client requests.
+
+"Events" are the way to initiate server-to-client communication. A server can broadcast an event to all
+its client when the connection is in persistent mode. This feature is yet to be implemented.

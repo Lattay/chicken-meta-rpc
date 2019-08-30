@@ -1,5 +1,8 @@
 *.so
+*.o
 *.c
 *.import.scm
 run
 unit-*
+*.sh
+*.link

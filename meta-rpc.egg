@@ -13,8 +13,9 @@
     (extension meta-rpc.interface
       (csc-options "-disable-interrupts")
       (source "src/interface.scm")
-      (module meta-rpc.interface))
+      (modules meta-rpc.interface))
     (extension meta-rpc.transport
       (csc-options "-disable-interrupts")
-      (source "src/transport/transport.scm")
-      (module meta-rpc.transport))))
+      (source "src/transport.scm")
+      (component-dependencies meta-rpc.interface)
+      (modules meta-rpc.transport))))
