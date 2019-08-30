@@ -20,6 +20,26 @@
               (set! val (car arg)))
           val)))
 
+
+(define-syntax error-as-msg
+  (syntax-rules ()
+    ((_ ((err res) expr) body ...)
+     (let ((res #f) (err #f))
+       (condition-case (set! res expr)
+                       (e (exn arity) (set! err 
+                                        (string-append 
+                                          "Wrong number of argument: "
+                                          (get-exn-msg e))))
+                       (e (exn type) (set! err
+                                       (string-append
+                                         "Type error: "
+                                         (get-exn-msg e))))
+                       (e (exn) (set! err
+                                  (string-append
+                                    "Error: "
+                                    (get-exn-msg e)))))
+       body ...))))
+
 (define (make-timeout-error id t)
   (let ((message (format "timeout error waiting for ~A for ~A s" id t)))
     (condition

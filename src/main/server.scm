@@ -31,6 +31,18 @@
   (close-output-port (conn-out co)))
 
 ;;;;;;;;;;;;;;;;;;;; Tools ;;;;;;;;;;;;;;;;;;;;
+
+(define-syntax log-errors
+  (syntax-rules ()
+    ((_ ctx first . body)
+     (let ((res #f))
+       (condition-case (set! res (begin first . body))
+                       (e (exn i/o net timeout)
+                          (logger ctx "Timeout reached:" (get-exn-msg e)))
+                       (e (exn)
+                          (logger ctx "Error encountered:" (get-exn-msg e))))
+       res))))
+
 (define (make-rpc-error type #!key (message "") (data '()) (code #f))
   (let ((err (make-hash-table)))
     (hash-table-set! err "data" '())
