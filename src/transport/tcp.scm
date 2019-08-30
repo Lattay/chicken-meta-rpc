@@ -22,6 +22,9 @@
 (define-method (accept (serv <transport-server-tcp>))
   (tcp-accept (slot-value serv 'listener)))
 
+(define-method (shutdown (serv <transport-server-tcp>))
+  (tcp-close (slot-value serv 'listener)))
+
 ; client side
 (define-class <transport-client-tcp> (<transport-client>)
   (host port (one-shot #f)))

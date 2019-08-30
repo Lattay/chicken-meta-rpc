@@ -11,6 +11,7 @@
                             one-shot?
                             ready?
                             accept
+                            shutdown
 
                             <transport-client>
                             transport-client?

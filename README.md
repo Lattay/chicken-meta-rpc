@@ -46,9 +46,13 @@ To implement a new message format one should subclass `<rpc-message-format>` fro
 *meta-rpc.interface*.
 It have to implement the following methods:
 - `(rpc-read msg-format port)`
-- `(rpc-write-response msg-format port message)`
-- `(rpc-write-notification msg-format port message)`
-- `(rpc-write-request msg-format port message)`
+- `(rpc-write-response msg-format port message)` `message` is of the form `(id
+  method-name params)`
+- `(rpc-write-notification msg-format port message)` `message` is of the form
+  `(method-name params)`
+- `(rpc-write-request msg-format port message)` `message` is of the form
+  `(id method-name error result)` with error and result being arbitrary (but no
+  error must be `'()`)
 
 The `rpc-read` method should raise condition `'(exn rpc invalid)` when
 the message cannot be interpreted as a valid RPC message.
@@ -57,7 +61,7 @@ the message cannot be interpreted as a valid RPC message.
 
 To implement a new message format one should subclass `<rpc-transport-server>`
 and `<rpc-transport-client>` from *meta-rpc.interface*.
-Server class have three methods:
+Server class have four methods:
 - `(one-shot? serv)` return `#t` if the connection should be used
   for only one exchange, return `#f` if the connection is stable and
   can be used for all exchanges with the client. This mode also allow 
@@ -65,6 +69,8 @@ Server class have three methods:
 - `(ready? serv)` return `#t` if a new connection is available
 - `(accept serv)` return a 2-values, input and output port for
   a new connection
+- `(shutdown serv)` perform all actions to close the listener/server side
+  transport/connection
 
 # Current project state
 

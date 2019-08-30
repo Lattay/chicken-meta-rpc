@@ -1,4 +1,7 @@
-(module meta-rpc.transport (make-transport-server-fifo
+(module meta-rpc.transport (<transport-server-file>
+                            <transport-client-file>
+
+                            make-transport-server-fifo
                             <transport-server-fifo>
                             make-transport-client-fifo
                             <transport-client-fifo>

@@ -8,6 +8,7 @@
 (define-method (one-shot? (obj <transport-server>)) #t)
 (define-method (ready? (obj <transport-server>)) #f)
 (define-method (accept (obj <transport-server>)) (values #f #f))
+(define-method (shutdown (obj <transport-server>)) '())
 ; (define-method (multiple-client? (obj <transport-server>) #t))
 
 ; client side
