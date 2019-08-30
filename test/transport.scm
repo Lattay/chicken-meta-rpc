@@ -77,31 +77,4 @@
       (tcp-close listener)
       )
     )
-
-  ; (test-group "fifo"
-  ;   (test-group "server"
-  ;     (define tr (make-transport-server-tcp "localhost" 4567))
-  ;     (test "not ready" #f (ready? tr))
-  ; 
-  ;     (define-values (in-cli out-cli) (tcp-connect "localhost" 4567))
-  ;     (test "ready" #t (ready? tr))
-  ;     (define-values (in-serv out-serv) (accept tr))
-  ;     (test "no longer ready" #f (ready? tr))
-  ;     (test "server-to-client-write" '(truc "foo" 56)
-  ;           (begin
-  ;             (write '(truc "foo" 56) out-serv)
-  ;             (read in-cli)))
-  ;     (test "server-to-client formatted" '(notification "foo" (1 2 3))
-  ;           (begin
-  ;             (rpc-write-notification msg-format out-serv '("foo" (1 2 3)))
-  ;             (rpc-read msg-format in-cli)))
-  ; 
-  ;     (test "client-to-server-write" '(truc "foo" 56)
-  ;           (begin
-  ;             (write '(truc "foo" 56) out-cli)
-  ;             (read in-serv)))
-  ;     (test "client-to-server formatted" '(request 1 "foo" (1 2 3))
-  ;           (begin
-  ;             (rpc-write-request msg-format out-serv '(1 "foo" (1 2 3)))
-  ;             (rpc-read msg-format in-cli)))))
   )
