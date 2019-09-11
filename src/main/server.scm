@@ -95,6 +95,8 @@
 
         (e (exn rpc app)
            (list (make-app-error e) '()))
+        (e (exn arity)
+           (list (make-rpc-error 'invalid-params)))
         ((exn)
          (list (make-rpc-error 'app-error) '())))))
 
