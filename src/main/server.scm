@@ -13,6 +13,7 @@
 
 ; public hash table to register methods
 (define *rpc-methods* (make-hash-table))
+(define *rpc-server-logger* logger)
 
 (define server-min-loop-time (make-parameter 0.05)) ; 50 ms
 (define server-max-threads (make-parameter 5))
@@ -38,9 +39,9 @@
      (let ((res #f))
        (condition-case (set! res (begin first . body))
                        (e (exn i/o net timeout)
-                          (logger ctx "Timeout reached:" (get-exn-msg e)))
+                          (*rpc-server-logger* ctx "Timeout reached:" (get-exn-msg e)))
                        (e (exn)
-                          (logger ctx "Error encountered:" (get-exn-msg e))))
+                          (*rpc-server-logger* ctx "Error encountered:" (get-exn-msg e))))
        res))))
 
 (define (make-rpc-error type #!key (message "") (data '()) (code #f))
@@ -136,6 +137,7 @@
   (case msg
     ((store-connection)
      (let ((co data))
+       (*rpc-server-logger* "server" "storing a new connection")
        (assert (and 'store-connection (conn? co)))
        (queue-add! (slot-value self 'connections)  co)))
 
@@ -153,7 +155,9 @@
            0
            (let ((co (queue-remove! (slot-value self 'connections))))
              (if (char-ready? (conn-in co))
-                 (send (slot-value self 'scheduler) 'new-message co)
+                 (begin
+                   (*rpc-server-logger* "server" "new message waiting")
+                   (send (slot-value self 'scheduler) 'new-message co))
                  (begin
                    (queue-add! (slot-value self 'connections) co)
                    (loop (sub1 rest))))))))
@@ -162,8 +166,9 @@
      (let loop ((rest (queue-length (slot-value self 'connections))))
        (unless (zero? rest)
          (let ((co (queue-remove! (slot-value self 'connections))))
-           (unless (port-closed? (conn-out co))
-             (queue-add! (slot-value self 'connections) co))
+           (if (port-closed? (conn-out co))
+               (*rpc-server-logger* "server" "removing closed connection")
+               (queue-add! (slot-value self 'connections) co))
            (loop (sub1 rest))))))
     (else
       (call-next-method))))
@@ -267,14 +272,25 @@
       (call-next-method))))
 
 (define-method (handle-new-message (self <worker>) id co)
+  (*rpc-server-logger* "server"
+                       (format "handling new message in ~A" id))
   (let-values (((err msg) (read-message (slot-value self 'format) (conn-in co))))
     (if err
-        (send (slot-value self 'parent) 'task-error `(,id ,co . ,err))
+        (begin
+          (*rpc-server-logger* "server"
+                               (format "error in worker ~A" id))
+          (send (slot-value self 'parent) 'task-error `(,id ,co . ,err)))
         (let ((res (handle-request msg)))
           (unless (null? res)
+            (*rpc-server-logger* "server" "try to write response")
             (log-errors "writing/response"
-                        (rpc-write-response (slot-value self 'format ) (conn-out co) res)))
-          (send (slot-value self 'parent) 'task-done `(,id ,co . ,res))))))
+                        (begin
+                          (rpc-write-response (slot-value self 'format ) (conn-out co) res)
+                          (*rpc-server-logger* "server" "successfully wrote response")))
+          (begin
+            (*rpc-server-logger* "server"
+                                 (format "task done in ~A" id))
+            (send (slot-value self 'parent) 'task-done `(,id ,co . ,res))))))))
 
 (define-method (handle-send-event (self <worker>) dest event)
   '())
