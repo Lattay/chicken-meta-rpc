@@ -14,6 +14,10 @@ CSC_OPTIONS=-disable-interrupts
 
 all: meta-rpc.so meta-rpc.transport.so meta-rpc.interface.so
 
+install: all
+	chicken-install
+	make clean
+
 help:
 	@echo "Usage: make [PREFIX=<chicken installation prefix>] [CSC=<csc command name>] <target>"
 	@echo "Available target:"

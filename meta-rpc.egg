@@ -1,6 +1,6 @@
 ((license "MIT")
  (category network)
- (dependencies matchable mailbox srfi-18 srfi-69)
+ (dependencies matchable mailbox srfi-18 srfi-69 queues)
  (test-dependencies test)
  (author "Théo Cavignac")
  (version "0.1.0")
