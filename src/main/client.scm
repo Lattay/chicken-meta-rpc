@@ -53,7 +53,7 @@
   (mailbox-send!
     requests
     (cons call-id 
-          (lambda (port)
+          (lambda (port) ; send-to function
             (case type
               ((request)
                (rpc-write-request msg-format port
@@ -61,7 +61,9 @@
               ((notify)
                (rpc-write-notification msg-format port
                            (list method-name args)))
-              (else #f))))))
+              (else 
+                (error (format "noting like this ~A" type))
+                #f))))))
 
 (define (client-wait responses call-id)
   ; loop until responses is set in table
@@ -154,6 +156,8 @@
               ((error err)
                (hash-table-set! responses id (list err '()))
                (error err))
+              ('()
+               (hash-table-set! responses id (list '(error invalid-response) '())))
               (any
                 (signal
                   (condition
