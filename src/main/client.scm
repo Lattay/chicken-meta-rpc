@@ -101,7 +101,7 @@
            (id (car req))
            (send-to (cdr req)))
       (error-as-msg ((err _) (send-to (cdr (connection))))
-                    (when err (hash-table-set! responses id (cons 'error err))))
+                    (when err (hash-table-set! responses id (list 'error err))))
       (send-requests-one-co transport requests responses connection))))
 
 (define (send-requests-multi-co transport requests responses connections)
@@ -154,9 +154,8 @@
               ((response id method err result)
                (hash-table-set! responses id (list err result)))
               ((error err)
-               (hash-table-set! responses id (list err '()))
-               (error err))
-              ('()
+               (hash-table-set! responses id (list err '())))
+              (()
                (hash-table-set! responses id (list '(error invalid-response) '())))
               (any
                 (signal
