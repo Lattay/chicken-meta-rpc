@@ -122,7 +122,7 @@
   (test-group "worker"
     (define wk (make-worker debug msg-format))
     (thread-start! (lambda () (work wk)))
-    (test "message" '(1 2 (response 1 "foo" () (2 1)))
+    (test "message" '(1 2 (response 1 () (2 1)))
       (let ()
         (flush-input in)
         (rpc-write-request msg-format out '(1 "foo" (1 2)))
@@ -207,7 +207,7 @@
     (define-values (in out) (accept transport))
     (define-values (inc outc) (connect transport))
     (define co (make-conn in out))
-    (test "new-message" '(task-done response 1 "foo" () (2 1))
+    (test "new-message" '(task-done response 1 () (2 1))
           (begin
             (rpc-write-request msg-format outc '(1 "foo" (1 2)))
             (send wk 'new-message (cons 5 co))

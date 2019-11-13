@@ -68,7 +68,7 @@
     (test "wait response" '(result . (2 1))
       (begin
         (let-values (((in out) (accept transport)))
-          (rpc-write-response msg-format out '(1 "foo" () (2 1)))
+          (rpc-write-response msg-format out '(1 () (2 1)))
           (client 'wait 1))))
     (define transport (make-pseudo-transport #f))
     (define client (make-client transport msg-format))
@@ -99,7 +99,7 @@
     (define transport (make-pseudo-transport #f))
     (define-values (server events stop-server) (make-server transport msg-format debug))
     (thread-start! (make-thread server 'server))
-    (test "send-request" '(response 1 "foo" () (2 1))
+    (test "send-request" '(response 1 () (2 1))
           (let-values (((in out) (connect transport)))
             (rpc-write-request msg-format out '(1 "foo" (1 2)))
             (thread-sleep! 5)

@@ -73,7 +73,7 @@
     (define transport (make-pseudo-transport #f))
     (define resp (make-hash-table))
     (define-values (in out) (make-tunnel-port))
-    (rpc-write-response msg-format out (list 5 "foo" '() '(1 2 3)))
+    (rpc-write-response msg-format out (list 5 '() '(1 2 3)))
     (assert (char-ready? in))
     (test "one-co response: " '(() . (1 2 3))
       (begin

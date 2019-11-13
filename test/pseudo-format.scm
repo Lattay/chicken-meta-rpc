@@ -22,7 +22,7 @@
   (match msg
     (('request id method-name params) msg)
     (('notification method-name params) msg)
-    (('response id method-name error result) msg)
+    (('response id error result) msg)
     (any (signal (condition `(exn location rpc-read-validation
                                   message ,(format "Invalid message ~A" msg))
                             '(rpc)

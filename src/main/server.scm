@@ -124,8 +124,8 @@
   (match-lambda*
     ((('request id method-name params))
      (if (list? params)
-        `(,id ,method-name . ,(call-method method-name params))
-        `(,id ,method-name ,(make-rpc-error 'parse-error) ())))
+        `(,id . ,(call-method method-name params))
+        `(,id ,(make-rpc-error 'parse-error) ())))
     ((('notification method-name params))
      (when (list? params)
         (call-method method-name params))
