@@ -16,23 +16,23 @@
 
 (test-group "test client"
   (test-group "client-wait"
-    (test "instant" 'that-s-it 
+    (test "instant" '(result . that-s-it)
       (begin
-        (hash-table-set! responses 2 'that-s-it)
+        (set-response! responses 2 result: 'that-s-it)
         (client-wait responses 2)))
 
-    (test "a bit" 'yes-papa 
+    (test "a bit" '(result . yes-papa)
       (begin
         (thread-start! (lambda ()
                          (thread-sleep! 1)
-                         (hash-table-set! responses 2 'yes-papa)))
+                         (set-response! responses 2 result: 'yes-papa)))
         (client-wait responses 2)))
     (client-wait-timeout 1)
     (test-error "too much"
                 (begin
                   (thread-start! (lambda ()
                                    (thread-sleep! 2)
-                                   (hash-table-set! responses 5 'no-way)))
+                                   (set-response! responses 5 result: 'no-way)))
                   (client-wait responses 2)))
     (test "all responses treated" 0 (hash-table-size responses)))
   (test-group "client-request"
@@ -75,10 +75,9 @@
     (define-values (in out) (make-tunnel-port))
     (rpc-write-response msg-format out (list 5 "foo" '() '(1 2 3)))
     (assert (char-ready? in))
-    (test "one-co response: " '(() (1 2 3))
+    (test "one-co response: " '(() . (1 2 3))
       (begin
         (receive-responses-one-co resp mb (make-parameter (cons in out)) msg-format)
-        (hash-table-ref/default resp 5 #f)
-        ))
+        (get-response resp 5)))
     )
   )

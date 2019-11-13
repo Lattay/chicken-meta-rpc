@@ -86,9 +86,9 @@
       (if tmp
           (let ((err (car tmp)) (result (cdr tmp)))
             (unset-response! responses call-id)
-            (if err
-                (cons 'error err)
-                (cons 'result result)))
+            (if (null? err)
+                (cons 'result result)
+                (cons 'error err)))
           (begin
             (thread-sleep! (client-wait-sleep-time))
             (let ((waited  (- (time-stamp) start-waiting)))

@@ -9,6 +9,9 @@
 (include "src/main/server.scm")
 
 
+; Mute logging
+(define *rpc-server-logger* (lambda _ '()))
+
 ; debug actor
 (define-class <debug> (<actor>)
   ((logs (make-mailbox))))

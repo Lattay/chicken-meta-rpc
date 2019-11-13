@@ -40,6 +40,8 @@
        (condition-case (set! res (begin first . body))
                        (e (exn i/o net timeout)
                           (*rpc-server-logger* ctx "Timeout reached:" (get-exn-msg e)))
+                       (e (exn i/o)
+                          (*rpc-server-logger* ctx "IO error:" (get-exn-msg e)))
                        (e (exn)
                           (*rpc-server-logger* ctx "Error encountered:" (get-exn-msg e))))
        res))))
@@ -97,15 +99,23 @@
   ; call method and handle errors
   (if (not (hash-table-exists? *rpc-methods* name))
       (list (make-rpc-error 'method-not-found) '())
-      (condition-case
-        (list '() (apply (hash-table-ref *rpc-methods* name) params))
+      (let ((method (hash-table-ref *rpc-methods* name)))
+        (*rpc-server-logger* "call-method" (format "Calling ~A with on parameters ~A" name params))
+        (condition-case
+          (list '() (apply method params))
 
-        (e (exn rpc app)
-           (list (make-app-error e) '()))
-        (e (exn arity)
-           (list (make-rpc-error 'invalid-params)))
-        (e (exn)
-         (list (make-rpc-error 'app-error data: (get-condition-property e 'exn 'message)) '())))))
+          (e (exn rpc app)
+             (*rpc-server-logger* "call-method error" (get-exn-msg e))
+             (list (make-app-error e) '()))
+          (e (exn arity)
+             (*rpc-server-logger* "call-method error" (get-exn-msg e))
+             (list (make-rpc-error 'invalid-params)))
+          (e (exn type)
+             (*rpc-server-logger* "call-method error" (get-exn-msg e))
+             (list (make-rpc-error 'invalid-params)))
+          (e (exn)
+             (*rpc-server-logger* "call-method error" (get-exn-msg e))
+             (list (make-rpc-error 'app-error data: (get-exn-msg e)) '()))))))
 
 (define handle-request
   ; interpret request message and handle error
@@ -113,9 +123,12 @@
   ; should not happen
   (match-lambda*
     ((('request id method-name params))
-     `(,id ,method-name . ,(call-method method-name params)))
+     (if (list? params)
+        `(,id ,method-name . ,(call-method method-name params))
+        `(,id ,method-name ,(make-rpc-error 'parse-error) ())))
     ((('notification method-name params))
-     (call-method method-name params)
+     (when (list? params)
+        (call-method method-name params))
      '())
     (any
       (list -1 "invalid" (make-rpc-error 'invalid-request) '()))))
@@ -245,19 +258,19 @@
                       (loop (add1 i))
                       (begin
                         (busy #t)
-                        (send wk 'new-message (cons i co)))))
-                (let ((wk (make-worker self (slot-value self 'format))))
+                        (send wk 'new-message co))))
+                (let ((wk (make-worker self (slot-value self 'format) i)))
                   (vector-set! workers i (cons (make-parameter #t) wk))
-                  (send wk 'new-message (cons i co)))))
+                  (send wk 'new-message co))))
           (send self 'new-message co)))))
 
 
 ; Workers
 (define-class <worker> (<actor>)
-  (parent format))
+  (parent format id))
 
-(define (make-worker parent msg-format)
-  (let ((wk (make <worker> 'parent parent 'format msg-format)))
+(define (make-worker parent msg-format id)
+  (let ((wk (make <worker> 'parent parent 'format msg-format 'id id)))
     (thread-start!
       (make-thread
         (lambda () (work wk))
@@ -270,33 +283,33 @@
 (define-method (handle (self <worker>) msg data)
   (case msg
     ((new-message)
-     (let ((id (car data)) (co (cdr data)))
-       (handle-new-message self id co)))
+     (let ((co data))
+       (handle-new-message self co)))
     ((send-event-to)
      (handle-send-event self (car data) (cdr data)))
     (else
       (call-next-method))))
 
-(define-method (handle-new-message (self <worker>) id co)
-  (*rpc-server-logger* "server"
-                       (format "handling new message in ~A" id))
-  (let-values (((err msg) (read-message (slot-value self 'format) (conn-in co))))
-    (if err
-        (begin
-          (*rpc-server-logger* "server"
-                               (format "error in worker ~A" id))
-          (send (slot-value self 'parent) 'task-error `(,id ,co . ,err)))
-        (let ((res (handle-request msg)))
-          (unless (null? res)
-            (*rpc-server-logger* "server" "try to write response")
-            (log-errors "writing/response"
-                        (begin
-                          (rpc-write-response (slot-value self 'format ) (conn-out co) res)
-                          (*rpc-server-logger* "server" "successfully wrote response")))
+(define-method (handle-new-message (self <worker>) co)
+  (let ((id (slot-value self 'id))
+        (msg-format (slot-value self 'format))
+        (parent (slot-value self 'parent)))
+    (*rpc-server-logger* "server" (format "worker ~A handling new message" id))
+    (let-values (((err msg) (read-message msg-format (conn-in co))))
+      (if err
           (begin
-            (*rpc-server-logger* "server"
-                                 (format "task done in ~A" id))
-            (send (slot-value self 'parent) 'task-done `(,id ,co . ,res))))))))
+            (*rpc-server-logger* "server" (format "error in worker ~A" id))
+            (send parent 'task-error `(,id ,co . ,err)))
+          (let ((res (handle-request msg)))
+            (unless (null? res)
+              (*rpc-server-logger* "server" "try to write response")
+              (log-errors "writing/response"
+                          (begin
+                            (rpc-write-response msg-format (conn-out co) res)
+                            (*rpc-server-logger* "server" "successfully wrote response")))
+              (begin
+                (*rpc-server-logger* "server" (format "worker ~A done" id))
+                (send parent 'task-done `(,id ,co . ,res)))))))))
 
 (define-method (handle-send-event (self <worker>) dest event)
   '())

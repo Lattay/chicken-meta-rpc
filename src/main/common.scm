@@ -12,7 +12,7 @@
         (newline (log-port))
         (begin
           (display (car rest) (log-port))
-          (display " ")
+          (display " " (log-port))
           (loop (cdr rest))))))
 
 (define get-exn-msg (condition-property-accessor 'exn 'message))

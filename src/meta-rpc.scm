@@ -7,6 +7,7 @@
                   server-max-threads
                   server-max-connections
                   *rpc-methods*
+                  *rpc-server-logger*
 
                   <scheduler>
 
