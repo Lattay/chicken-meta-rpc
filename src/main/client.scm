@@ -48,6 +48,20 @@
       '(client)
       `(timeout id ,id))))
 
+; Responses
+(define (get-response table id)
+  (hash-table-ref/default table id #f))
+
+(define (unset-response! table id)
+  (hash-table-delete! table id))
+
+(define (set-response! table id #!key (error '()) (result '()))
+  (hash-table-set!
+    table id
+    (cons
+      (if (hash-table? error) (hash-table->alist error) error)
+      result)))
+
 (define (client-request requests type call-id msg-format method-name args)
   ; add a request/notification to the queue 
   (mailbox-send!
@@ -68,17 +82,19 @@
 (define (client-wait responses call-id)
   ; loop until responses is set in table
   (let loop ((start-waiting (time-stamp)))
-    (let ((tmp (hash-table-ref/default responses call-id #f)))
+    (let ((tmp (get-response responses call-id)))
       (if tmp
-        (begin
-          (hash-table-delete! responses call-id)
-          tmp)
-        (begin
-          (thread-sleep! (client-wait-sleep-time))
-          (let ((waited  (- (time-stamp) start-waiting)))
-            (if (> waited (client-wait-timeout))
-              (signal (make-timeout-error call-id waited))
-              (loop start-waiting))))))))
+          (let ((err (car tmp)) (result (cdr tmp)))
+            (unset-response! responses call-id)
+            (if err
+                (cons 'error err)
+                (cons 'result result)))
+          (begin
+            (thread-sleep! (client-wait-sleep-time))
+            (let ((waited  (- (time-stamp) start-waiting)))
+              (if (> waited (client-wait-timeout))
+                  (signal (make-timeout-error call-id waited))
+                  (loop start-waiting))))))))
 
 (define gen-id
   ; thread safe counter
@@ -101,7 +117,7 @@
            (id (car req))
            (send-to (cdr req)))
       (error-as-msg ((err _) (send-to (cdr (connection))))
-                    (when err (hash-table-set! responses id (list 'error err))))
+                    (when err (set-response! responses id error: err)))
       (send-requests-one-co transport requests responses connection))))
 
 (define (send-requests-multi-co transport requests responses connections)
@@ -113,7 +129,7 @@
              (send-to (cdr req)))
         (hash-table-set! connections id (cons in out))
         (error-as-msg ((err _) (send-to out))
-                      (when err (hash-table-set! responses id (cons 'error err))))
+                      (when err (set-response! responses id error: err)))
         (close-output-port out))
       (send-requests-multi-co transport requests responses connections))))
 
@@ -131,7 +147,9 @@
     (let ((msg (read-msg msg-format (car (connection)))))
       (case (car msg)
         ((response)
-         (hash-table-set! responses (cadr msg) (cdddr msg)))
+         (set-response! responses (cadr msg)
+                        error: (cadddr msg)
+                        result: (car (cddddr msg))))
         ((notify)
          (mailbox-send! events msg))
         ((error)
@@ -152,11 +170,11 @@
           (let ((msg (read-msg msg-format (car co))))
             (match msg
               ((response id method err result)
-               (hash-table-set! responses id (list err result)))
+               (set-response! responses id error: err result: result))
               ((error err)
-               (hash-table-set! responses id (list err '())))
+               (set-response! responses id error: err))
               (()
-               (hash-table-set! responses id (list '(error invalid-response) '())))
+               (set-response! responses id error: 'invalid-response))
               (any
                 (signal
                   (condition
