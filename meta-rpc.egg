@@ -1,9 +1,9 @@
 ((license "MIT")
  (category network)
- (dependencies matchable mailbox srfi-18 srfi-69 queues)
+ (dependencies matchable mailbox srfi-18 srfi-69 queues coops)
  (test-dependencies test)
  (author "Théo Cavignac")
- (version "0.1.0")
+ (version "0.2.0")
  (synopsis "Multiple encoding rpc client and server implementation for CHICKEN")
  (components 
     (extension meta-rpc

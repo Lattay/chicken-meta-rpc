@@ -42,20 +42,31 @@ without any more informations.
 
 ## RPC message format
 
-To implement a new message format one should subclass `<rpc-message-format>` from 
-*meta-rpc.interface*.
-It have to implement the following methods:
-- `(rpc-read msg-format port)`
-- `(rpc-write-response msg-format port message)` `message` is of the form `(id
-  method-name params)`
-- `(rpc-write-notification msg-format port message)` `message` is of the form
-  `(method-name params)`
-- `(rpc-write-request msg-format port message)` `message` is of the form
-  `(id method-name error result)` with error and result being arbitrary (but no
-  error must be `'()`)
+To implement a new message format one should hinerit from the `coops` class `<rpc-message-format>`
+from *meta-rpc.interface*.
+It have to implement the six methods to be used by the server and client.
 
-The `rpc-read` method should raise condition `'(exn rpc invalid)` when
-the message cannot be interpreted as a valid RPC message.
+### Read
+`(rpc-read msg-format port)`
+
+Read a message from `port`.
+It must try to read and return a message of the form:
+- `(list 'request id method-name parameters)` for a request
+- `(list 'notify id method-name parameters)` for a notification
+- `(list 'response id error result)` for a response. No error is represented with `'()`
+
+If the message cannot be interpreted as a valid RPC message, it should raise
+condition `'(exn rpc invalid)`.
+
+
+### Write
+`(rpc-write-response msg-format port message)`
+`(rpc-write-notification msg-format port message)`
+`(rpc-write-request msg-format port message)`
+
+These should send through `port` the valid RPC message according to the standard `msg-format` implement.
+For response `message` is of the form `(id error result)`
+For requests and notifications `message` is of the form `(id method-name params)`
 
 ## RPC transport
 
@@ -74,9 +85,22 @@ Server class have four methods:
 
 # Current project state
 
-The basic features of the client and the server are implemented and tested.
 Client can proceed to synchronous and asynchronous call and send notifications to the server.
 Server can register methods, listen for connections and run actions associated with client requests.
 
-"Events" are the way to initiate server-to-client communication. A server can broadcast an event to all
-its client when the connection is in persistent mode. This feature is yet to be implemented.
+TODO (:100: implemented and tested :o: implemented and not tested :x: not implemented)
+- :x: basic transports
+    - :100: TCP IPv4
+    - :o: File IO
+    - :o: Standard IO
+- :x: advanced transports
+    - :x: Unix port
+    - :x: TCP IPv6
+- :x: Basic features
+    - :100: async requests
+    - :100: sync requests
+    - :o: notifications
+    - :x: server to client notifications
+- :x: Benchmark
+    - :x: performances
+    - :x: resilience
