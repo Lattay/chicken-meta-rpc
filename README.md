@@ -96,11 +96,15 @@ TODO (:100: implemented and tested :o: implemented and not tested :x: not implem
 - :x: advanced transports
     - :x: Unix port
     - :x: TCP IPv6
+    - :x: FIFO
 - :x: Basic features
     - :100: async requests
     - :100: sync requests
     - :o: notifications
-    - :x: server to client notifications
+    - :x: server to client notification
+- :x: Advanced features
+    - :x: server to client requests
+    - :x: client to server responses
 - :x: Benchmark
     - :x: performances
     - :x: resilience
