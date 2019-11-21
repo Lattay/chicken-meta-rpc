@@ -13,14 +13,6 @@
 (define client-max-connections (make-parameter 5))
 (define client-wait-timeout (make-parameter 600))
 
-(define (make-multi-thread-parameter value)
-  (let ((val value))
-        (lambda arg
-          (when (not (null? arg))
-              (set! val (car arg)))
-          val)))
-
-
 (define-syntax error-as-msg
   (syntax-rules ()
     ((_ ((err res) expr) body ...)
@@ -50,7 +42,9 @@
 
 ; Responses
 (define (get-response table id)
-  (hash-table-ref/default table id #f))
+  (if (not (hash-table-exists? table id))
+      #f
+      (hash-table-ref table id)))
 
 (define (unset-response! table id)
   (hash-table-delete! table id))
@@ -62,39 +56,40 @@
       (if (hash-table? error) (hash-table->alist error) error)
       result)))
 
-(define (client-request requests type call-id msg-format method-name args)
-  ; add a request/notification to the queue 
-  (mailbox-send!
-    requests
-    (cons call-id 
-          (lambda (port) ; send-to function
-            (case type
-              ((request)
-               (rpc-write-request msg-format port
-                           (list call-id method-name args)))
-              ((notify)
-               (rpc-write-notification msg-format port
-                           (list method-name args)))
-              (else 
-                (error (format "noting like this ~A" type))
-                #f))))))
+(define (send-request-one-co transport id request on-error connection)
+  (when (or (not (connection)) (port-closed? (cdr (connection))))
+    (let-values (((in out) (connect transport)))
+      (connection (cons in out))))
+  (error-as-msg ((err _) (request (cdr (connection))))
+                (when err (on-error err))))
 
-(define (client-wait responses call-id)
-  ; loop until responses is set in table
-  (let loop ((start-waiting (time-stamp)))
-    (let ((tmp (get-response responses call-id)))
-      (if tmp
-          (let ((err (car tmp)) (result (cdr tmp)))
-            (unset-response! responses call-id)
-            (if (null? err)
-                (cons 'result result)
-                (cons 'error err)))
-          (begin
-            (thread-sleep! (client-wait-sleep-time))
-            (let ((waited  (- (time-stamp) start-waiting)))
-              (if (> waited (client-wait-timeout))
-                  (signal (make-timeout-error call-id waited))
-                  (loop start-waiting))))))))
+(define (send-request-multi-co transport id request on-error connections)
+  (if (< (client-max-connections) (hash-table-size connections))
+      (error "Too many opened connections."))
+  (let-values (((in out) (connect transport)))
+    (hash-table-set! connections id (cons in out))
+    (error-as-msg ((err _) (request out))
+                  (when err (on-error err)))
+    (close-output-port out)))
+
+(define (client-request type call-id msg-format transport connection.s responses method-name args)
+  ; add a request/notification to the queue 
+  (let ((one-co (not (one-shot? transport)))
+        (req (lambda (port) ; request function
+               (case type
+                 ((request)
+                  (rpc-write-request msg-format port
+                                     (list call-id method-name args)))
+                 ((notify)
+                  (rpc-write-notification msg-format port
+                                          (list method-name args)))
+                 (else 
+                   (error (format "noting like this ~A" type))
+                   #f))))
+        (on-error (lambda (err)
+                    (set-response! responses call-id error: err))))
+    ((if one-co send-request-one-co send-request-multi-co)
+     transport call-id req on-error connection.s)))
 
 (define gen-id
   ; thread safe counter
@@ -107,31 +102,6 @@
         (set! counter (add1 counter))
         (mutex-unlock! lock)
         tmp))))
-
-(define (send-requests-one-co transport requests responses connection)
-  (unless (mailbox-empty? requests)
-    (when (or (not (connection)) (port-closed? (cdr (connection))))
-        (let-values (((in out) (connect transport)))
-          (connection (cons in out))))
-    (let* ((req (mailbox-receive! requests))
-           (id (car req))
-           (send-to (cdr req)))
-      (error-as-msg ((err _) (send-to (cdr (connection))))
-                    (when err (set-response! responses id error: err)))
-      (send-requests-one-co transport requests responses connection))))
-
-(define (send-requests-multi-co transport requests responses connections)
-  (unless (or (mailbox-empty? requests)
-              (< (client-max-connections) (hash-table-size connections)))
-    (let-values (((in out) (connect transport)))
-      (let* ((req (mailbox-receive! requests))
-             (id (car req))
-             (send-to (cdr req)))
-        (hash-table-set! connections id (cons in out))
-        (error-as-msg ((err _) (send-to out))
-                      (when err (set-response! responses id error: err)))
-        (close-output-port out))
-      (send-requests-multi-co transport requests responses connections))))
 
 (define (read-msg msg-format port)
   (condition-case (rpc-read msg-format port)
@@ -153,8 +123,7 @@
         ((notify)
          (mailbox-send! events msg))
         ((error)
-         ; (mailbox-send! events msg))
-         (error msg))
+         (mailbox-send! events msg)))
         (else ; should not happend
           (let ((m (format "fuck this ~A!" msg)))
             (signal
@@ -183,24 +152,22 @@
             #t)
           #f))))
 
-(define (client-worker transport msg-format requests responses events stop)
-  (let* ((one-co (not (one-shot? transport))) ; one-shot connectionS or multi-shot connection_
-         (connection (if one-co (make-multi-thread-parameter #f) #f))
-         (connections (if one-co #f (make-hash-table))))
-    (let loop ((t-prev (time-stamp)))
-      (if (stop)
-          '()
-          (let ((t-now (time-stamp)))
-            (thread-sleep! (- (+ (client-min-loop-time) t-prev) t-now))
-            (if one-co
-                (begin
-                  (send-requests-one-co transport requests responses connection)
-                  (receive-responses-one-co responses events connection msg-format)
-                  (loop t-now))
-                (begin
-                  (send-requests-multi-co transport requests responses connections)
-                  (receive-responses-multi-co responses connections msg-format)
-                  (loop t-now))))))))
+(define (client-waiter transport msg-format one-co connection.s requests responses events)
+  (lambda (call-id)
+    (let wait-for-id ((timeout (+ (client-wait-timeout) (time-stamp))))
+      (if (>= (time-stamp) timeout)
+          '(timeout)
+          (begin
+            ((if one-co receive-responses-one-co receive-responses-multi-co)
+             responses events connection.s msg-format)
+            (let ((resp (get-response responses call-id)))
+              (if resp
+                  (let ((err (car resp)) (result (cdr resp)))
+                    (unset-response! responses call-id)
+                    (if (null? err)
+                        (cons 'result result)
+                        (cons 'error err)))
+                  (wait-for-id timeout))))))))
 
 (define (poll-events! events)
   (let loop ((acc '()))
@@ -212,38 +179,27 @@
   (let* ((requests (make-mailbox))
          (responses (make-hash-table))
          (events (make-mailbox))
-         (stop-client (make-multi-thread-parameter #f))
-         (start-client (make-thread
-                         (lambda ()
-                           (client-worker transport msg-format requests
-                                          responses events stop-client))
-                         'client-worker)))
-    (if autostart
-        (thread-start! start-client))
+         (one-co (not (one-shot? transport)))
+         (connection.s (if one-co (make-parameter #f) (make-hash-table)))
+         (wait (client-waiter transport msg-format one-co connection.s
+                                requests responses events)))
     (match-lambda*
-      (('start) ; start event loop thread
-       (if (not autostart)
-           (thread-start! start-client)))
-
-      (('stop)
-       (stop-client #t))
-
-      (('call method-name args) ; send a request
+      (('call method-name . args) ; send a request
        (let ((call-id (gen-id)))
-         (client-request requests 'request call-id msg-format method-name args)
+         (client-request 'request call-id msg-format transport connection.s responses method-name args)
          call-id))
 
-      (('sync-call method-name args) ; send a request and block until the server respond
+      (('sync-call method-name . args) ; send a request and block until the server respond
        (let ((call-id (gen-id)))
-         (client-request requests 'request call-id msg-format method-name args)
-         (client-wait responses call-id)))
+         (client-request 'request call-id msg-format transport connection.s responses method-name args)
+         (wait call-id)))
 
       (('wait call-id) ; block until the server respond to the request id
-       (client-wait responses call-id))
+       (wait call-id))
 
-      (('notify method-name args) ; send a notification
+      (('notify method-name . args) ; send a notification
        (let ((call-id (gen-id)))
-         (client-request requests 'notify call-id msg-format method-name args)
+         (client-request 'notify call-id msg-format transport connection.s responses method-name args)
          '()))
 
       (('poll-events) ; look for server events

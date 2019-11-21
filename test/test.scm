@@ -48,23 +48,15 @@
 
 ; start the server
 
-(test-group "tests"
+(test-group "all"
   (test-group "client"
     (define transport (make-pseudo-transport #f))
     (define client (make-client transport msg-format))
     (test "send request" '(request 1 "foo" (1 2))
       (begin
-        (client 'call "foo" '(1 2))
-        (wait-ready transport 5)
+        (client 'call "foo" 1 2)
         (let-values (((in out) (accept transport)))
-          (let loop ((retry 5))
-            (if (zero? retry)
-                'timeout
-                (if (char-ready? in)
-                    (rpc-read msg-format in)
-                    (begin
-                      (thread-sleep! 1)
-                      (loop (sub1 retry)))))))))
+          (rpc-read msg-format in))))
     (test "wait response" '(result . (2 1))
       (begin
         (let-values (((in out) (accept transport)))
@@ -74,18 +66,11 @@
     (define client (make-client transport msg-format))
     (test "send notification" '(notification "foo" (1 2))
       (begin
-        (client 'notify "foo" '(1 2))
-        (thread-sleep! 1)
-        (wait-ready transport 5)
+        (client 'notify "foo" 1 2)
         (let-values (((in out) (accept transport)))
-          (let loop ((retry 5))
-            (if (zero? retry)
-                'timeout
-                (if (char-ready? in)
-                    (rpc-read msg-format in)
-                    (begin
-                      (thread-sleep! 1)
-                      (loop (sub1 retry)))))))))
+          (if (char-ready? in)
+              (rpc-read msg-format in)
+              'no-response))))
     )
 
   (test-group "server"
@@ -100,12 +85,12 @@
     (define-values (server events stop-server) (make-server transport msg-format debug))
     (thread-start! (make-thread server 'server))
     (test "send-request" '(response 1 () (2 1))
-          (let-values (((in out) (connect transport)))
-            (rpc-write-request msg-format out '(1 "foo" (1 2)))
-            (thread-sleep! 5)
-            (if (char-ready? in)
-                (rpc-read msg-format in)
-                'no-response)))
+      (let-values (((in out) (connect transport)))
+        (rpc-write-request msg-format out '(1 "foo" (1 2)))
+        (thread-sleep! 0.5)
+        (if (char-ready? in)
+            (rpc-read msg-format in)
+            'no-response)))
     (stop-server))
 
   (test-group "integrated"
@@ -121,7 +106,7 @@
         (syntax-rules ()
           ((_ client da db a b)
            (test-group (format "sync-call foo ~A ~A" a b)
-             (test "result" `(result . (,b ,a)) (client 'sync-call "foo" (list a b)))
+             (test "result" `(result . (,b ,a)) (client 'sync-call "foo" a b))
              (test "a" a (da))
              (test "b" b (db))))))
       (test-sync-call-foo client foo-a foo-b 4 5)
@@ -134,7 +119,7 @@
       (define-syntax test-sync-call-bar
         (syntax-rules ()
           ((_ client count)
-           (test (format "#~A" count) `(result . ,count) (client 'sync-call "bar" '())))))
+           (test (format "#~A" count) `(result . ,count) (client 'sync-call "bar")))))
       (test-sync-call-bar client 1)
       (test-sync-call-bar client 2)
       (test-sync-call-bar client 3)
@@ -142,8 +127,8 @@
 
     (test-group "async-call foo" '()
       (test "two concurrent_call" '((result . (4 6)) (result . (5 1)))
-            (let ((c1 (client 'call "foo" '(6 4)))
-                  (c2 (client 'call "foo" '(1 5))))
+            (let ((c1 (client 'call "foo" 6 4))
+                  (c2 (client 'call "foo" 1 5)))
               (list
                 (client 'wait c1)
                 (client 'wait c2))))
@@ -153,12 +138,12 @@
                                     (result . (3 1))
                                     (result . (9 8))
                                     (result . (4 4)))
-            (let ((c1 (client 'call "foo" '(6 4)))
-                  (c2 (client 'call "foo" '(1 5)))
-                  (c3 (client 'call "foo" '(2 5)))
-                  (c4 (client 'call "foo" '(1 3)))
-                  (c5 (client 'call "foo" '(8 9)))
-                  (c6 (client 'call "foo" '(4 4))))
+            (let ((c5 (client 'call "foo" 8 9))
+                  (c4 (client 'call "foo" 1 3))
+                  (c3 (client 'call "foo" 2 5))
+                  (c2 (client 'call "foo" 1 5))
+                  (c1 (client 'call "foo" 6 4))
+                  (c6 (client 'call "foo" 4 4)))
               (list
                 (client 'wait c1)
                 (client 'wait c2)
