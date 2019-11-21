@@ -123,7 +123,7 @@
         ((notify)
          (mailbox-send! events msg))
         ((error)
-         (mailbox-send! events msg)))
+         (mailbox-send! events msg))
         (else ; should not happend
           (let ((m (format "fuck this ~A!" msg)))
             (signal
