@@ -1,7 +1,7 @@
 (import chicken.tcp)
 
 (define +max-co-default+ 5)
-(define +one-shot-default+ 5)
+(define +one-shot-default+ #f)
 
 ; server side
 (define-class <transport-server-tcp> (<transport-server>)
