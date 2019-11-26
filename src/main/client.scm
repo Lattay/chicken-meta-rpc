@@ -91,18 +91,6 @@
     ((if one-co send-request-one-co send-request-multi-co)
      transport call-id req on-error connection.s)))
 
-(define gen-id
-  ; thread safe counter
-  (let ((counter 1)
-        (lock (make-mutex)))
-    (lambda ()
-      (let ((tmp #f))
-        (mutex-lock! lock)
-        (set! tmp counter)
-        (set! counter (add1 counter))
-        (mutex-unlock! lock)
-        tmp))))
-
 (define (read-msg msg-format port)
   (condition-case (rpc-read msg-format port)
     ((exn rpc invalid)
@@ -131,7 +119,7 @@
                 `(exn location receive-response message ,m)))))))
     (receive-responses-one-co responses events connection msg-format)))
 
-(define (receive-responses-multi-co responses connections msg-format)
+(define (receive-responses-multi-co responses events connections msg-format)
   (hash-table-remove!
     connections
     (lambda (id co)
@@ -175,14 +163,21 @@
         acc
         (loop (cons (mailbox-receive! events) acc)))))
 
-(define (make-client transport msg-format #!optional (autostart #t))
-  (let* ((requests (make-mailbox))
+(define (make-client transport msg-format)
+  (let* ((gen-id (let ((counter 1) (lock (make-mutex)))
+                   (lambda ()
+                     (let ((tmp #f))
+                       (mutex-lock! lock)
+                       (set! tmp counter) (set! counter (add1 counter))
+                       (mutex-unlock! lock)
+                       tmp))))
+         (requests (make-mailbox))
          (responses (make-hash-table))
          (events (make-mailbox))
          (one-co (not (one-shot? transport)))
          (connection.s (if one-co (make-parameter #f) (make-hash-table)))
          (wait (client-waiter transport msg-format one-co connection.s
-                                requests responses events)))
+                              requests responses events)))
     (match-lambda*
       (('call method-name . args) ; send a request
        (let ((call-id (gen-id)))

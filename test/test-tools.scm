@@ -52,8 +52,8 @@
                   (rpc-write-request fmt out (list "foo"))
                   (rpc-read fmt in))))
 
-  (test-group "transport"
-    (define tr (make-pseudo-transport #f))
+  (test-group "transport one-co"
+    (define tr (make-pseudo-transport))
     (test "not ready" #f (ready? tr))
     (define-values (in-cli out-cli) (connect tr))
     (test "ready" #t (ready? tr))
@@ -72,6 +72,41 @@
       (begin
         (write '(truc "foo" 56) out-cli)
         (read in-serv)))
+    (test "client-to-server-string" "hello"
+      (begin
+        (write-string "hello" #f out-cli)
+        (read-string #f in-serv))))
+
+  (test-group "transport multi-co"
+    (define tr (make-pseudo-transport-multi-co))
+    (test "not ready" #f (ready? tr))
+    (define-values (in-cli out-cli) (connect tr))
+    (test "ready" #t (ready? tr))
+    (define-values (in-serv out-serv) (accept tr))
+    (test "no longer ready" #f (ready? tr))
+    (test "server-to-client-write" '(truc "foo" 56)
+      (begin
+        (write '(truc "foo" 56) out-serv)
+        (read in-cli)))
+    (define-values (in-cli out-cli) (connect tr))
+    (test "ready" #t (ready? tr))
+    (define-values (in-serv out-serv) (accept tr))
+    (test "server-to-client-string" "hello"
+      (begin
+        (write-string "hello" #f out-serv)
+        (read-string #f in-cli)))
+
+    (test "not ready" #f (ready? tr))
+    (define-values (in-cli out-cli) (connect tr))
+    (test "ready" #t (ready? tr))
+    (define-values (in-serv out-serv) (accept tr))
+    (test "client-to-server-write" '(truc "foo" 56)
+      (begin
+        (write '(truc "foo" 56) out-cli)
+        (read in-serv)))
+    (define-values (in-cli out-cli) (connect tr))
+    (test "ready" #t (ready? tr))
+    (define-values (in-serv out-serv) (accept tr))
     (test "client-to-server-string" "hello"
       (begin
         (write-string "hello" #f out-cli)
